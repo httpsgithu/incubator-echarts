@@ -18,17 +18,19 @@
 */
 
 import * as graphic from '../../util/graphic';
-import { enterEmphasis, leaveEmphasis, enableHoverEmphasis, setStatesStylesFromModel } from '../../util/states';
+import { enterEmphasis, leaveEmphasis, toggleHoverEmphasis, setStatesStylesFromModel } from '../../util/states';
 import { LayoutOrient, ECElement } from '../../util/types';
-import { PathProps } from 'zrender/src/graphic/Path';
+import type { PathProps, PathStyleProps } from 'zrender/src/graphic/Path';
 import SankeySeriesModel, { SankeyEdgeItemOption, SankeyNodeItemOption } from './SankeySeries';
 import ChartView from '../../view/Chart';
 import GlobalModel from '../../model/Global';
 import ExtensionAPI from '../../core/ExtensionAPI';
-import List from '../../data/List';
+import SeriesData from '../../data/SeriesData';
 import { RectLike } from 'zrender/src/core/BoundingRect';
 import { setLabelStyle, getLabelStatesModels } from '../../label/labelStyle';
 import { getECData } from '../../util/innerStore';
+import { isString, retrieve3 } from 'zrender/src/core/util';
+import type { GraphEdge } from '../../data/Graph';
 
 class SankeyPathShape {
     x1 = 0;
@@ -107,7 +109,7 @@ class SankeyView extends ChartView {
 
     private _focusAdjacencyDisabled = false;
 
-    private _data: List;
+    private _data: SeriesData;
 
     render(seriesModel: SankeySeriesModel, ecModel: GlobalModel, api: ExtensionAPI) {
         const sankeyView = this;
@@ -194,45 +196,60 @@ class SankeyView extends ChartView {
 
             curve.useStyle(lineStyleModel.getItemStyle());
             // Special color, use source node color or target node color
-            switch (curve.style.fill) {
-                case 'source':
-                    curve.style.fill = edge.node1.getVisual('color');
-                    curve.style.decal = edge.node1.getVisual('style').decal;
-                    break;
-                case 'target':
-                    curve.style.fill = edge.node2.getVisual('color');
-                    curve.style.decal = edge.node2.getVisual('style').decal;
-                    break;
-                case 'gradient':
-                    const sourceColor = edge.node1.getVisual('color');
-                    const targetColor = edge.node2.getVisual('color');
-                    if (typeof sourceColor === 'string' && typeof targetColor === 'string') {
-                        curve.style.fill = new graphic.LinearGradient(0, 0, 1, 0, [{
-                            color: sourceColor,
-                            offset: 0
-                        }, {
-                            color: targetColor,
-                            offset: 1
-                        }]);
-                    }
-            }
+            applyCurveStyle(curve.style, orient, edge);
+
+
+            const defaultEdgeLabelText = `${edgeModel.get('value')}`;
+            const edgeLabelStateModels = getLabelStatesModels(edgeModel, 'edgeLabel');
+
+            setLabelStyle(
+                curve, edgeLabelStateModels,
+                {
+                    labelFetcher: {
+                        getFormattedLabel(dataIndex, stateName, dataType, labelDimIndex, formatter, extendParams) {
+                            return seriesModel.getFormattedLabel(
+                                dataIndex, stateName, 'edge',
+                                labelDimIndex,
+                                // ensure edgeLabel formatter is provided
+                                // to prevent the inheritance from `label.formatter` of the series
+                                retrieve3(
+                                    formatter,
+                                    edgeLabelStateModels.normal && edgeLabelStateModels.normal.get('formatter'),
+                                    defaultEdgeLabelText
+                                ),
+                                extendParams
+                            );
+                        }
+                    },
+                    labelDataIndex: edge.dataIndex,
+                    defaultText: defaultEdgeLabelText
+                }
+            );
+            curve.setTextConfig({ position: 'inside' });
 
             const emphasisModel = edgeModel.getModel('emphasis');
 
-            setStatesStylesFromModel(curve, edgeModel, 'lineStyle', (model) => model.getItemStyle());
+            setStatesStylesFromModel(curve, edgeModel, 'lineStyle', (model) => {
+                const style = model.getItemStyle();
+
+                applyCurveStyle(style, orient, edge);
+
+                return style;
+            });
 
             group.add(curve);
 
             edgeData.setItemGraphicEl(edge.dataIndex, curve);
 
             const focus = emphasisModel.get('focus');
-            enableHoverEmphasis(
+            toggleHoverEmphasis(
                 curve,
-                focus === 'adjacency' ? edge.getAdjacentDataIndices() : focus,
-                emphasisModel.get('blurScope')
+                focus === 'adjacency' ? edge.getAdjacentDataIndices()
+                : focus === 'trajectory' ? edge.getTrajectoryDataIndices()
+                : focus,
+                emphasisModel.get('blurScope'),
+                emphasisModel.get('disabled')
             );
-
-            getECData(curve).dataType = 'edge';
         });
 
         // Generate a rect for each node
@@ -242,13 +259,15 @@ class SankeyView extends ChartView {
             const dragX = itemModel.get('localX');
             const dragY = itemModel.get('localY');
             const emphasisModel = itemModel.getModel('emphasis');
+            const borderRadius = itemModel.get(['itemStyle', 'borderRadius']) as number | number[] || 0;
 
             const rect = new graphic.Rect({
                 shape: {
                     x: dragX != null ? dragX * width : layout.x,
                     y: dragY != null ? dragY * height : layout.y,
                     width: layout.dx,
-                    height: layout.dy
+                    height: layout.dy,
+                    r: borderRadius
                 },
                 style: itemModel.getModel('itemStyle').getItemStyle(),
                 z2: 10
@@ -257,7 +276,11 @@ class SankeyView extends ChartView {
             setLabelStyle(
                 rect, getLabelStatesModels(itemModel),
                 {
-                    labelFetcher: seriesModel,
+                    labelFetcher: {
+                        getFormattedLabel(dataIndex, stateName) {
+                            return seriesModel.getFormattedLabel(dataIndex, stateName, 'node');
+                        }
+                    },
                     labelDataIndex: node.dataIndex,
                     defaultText: node.id
                 }
@@ -277,10 +300,15 @@ class SankeyView extends ChartView {
             getECData(rect).dataType = 'node';
 
             const focus = emphasisModel.get('focus');
-            enableHoverEmphasis(
+            toggleHoverEmphasis(
                 rect,
-                focus === 'adjacency' ? node.getAdjacentDataIndices() : focus,
-                emphasisModel.get('blurScope')
+                focus === 'adjacency'
+                    ? node.getAdjacentDataIndices()
+                    : focus === 'trajectory'
+                    ? node.getTrajectoryDataIndices()
+                    : focus,
+                emphasisModel.get('blurScope'),
+                emphasisModel.get('disabled')
             );
         });
 
@@ -321,6 +349,39 @@ class SankeyView extends ChartView {
     }
 }
 
+/**
+ * Special color, use source node color or target node color
+ * @param curveProps curve's style to parse
+ * @param orient direction
+ * @param edge current curve data
+ */
+function applyCurveStyle(curveProps: PathStyleProps, orient: 'horizontal' | 'vertical', edge: GraphEdge) {
+    switch (curveProps.fill) {
+        case 'source':
+            curveProps.fill = edge.node1.getVisual('color');
+            curveProps.decal = edge.node1.getVisual('style').decal;
+            break;
+        case 'target':
+            curveProps.fill = edge.node2.getVisual('color');
+            curveProps.decal = edge.node2.getVisual('style').decal;
+            break;
+        case 'gradient':
+            const sourceColor = edge.node1.getVisual('color');
+            const targetColor = edge.node2.getVisual('color');
+            if (isString(sourceColor) && isString(targetColor)) {
+                curveProps.fill = new graphic.LinearGradient(
+                    0, 0, +(orient === 'horizontal'), +(orient === 'vertical'), [{
+                        color: sourceColor,
+                        offset: 0
+                    }, {
+                        color: targetColor,
+                        offset: 1
+                    }]
+                );
+            }
+    }
+}
+
 // Add animation to the view
 function createGridClipShape(rect: RectLike, seriesModel: SankeySeriesModel, cb: () => void) {
     const rectEl = new graphic.Rect({
@@ -328,7 +389,7 @@ function createGridClipShape(rect: RectLike, seriesModel: SankeySeriesModel, cb:
             x: rect.x - 10,
             y: rect.y - 10,
             width: 0,
-            height: rect.height + 20
+            height: rect.height + 20,
         }
     });
     graphic.initProps(rectEl, {

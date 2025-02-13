@@ -25,17 +25,17 @@ import SymbolClz from '../helper/Symbol';
 import lineAnimationDiff from './lineAnimationDiff';
 import * as graphic from '../../util/graphic';
 import * as modelUtil from '../../util/model';
-import {ECPolyline, ECPolygon} from './poly';
+import { ECPolyline, ECPolygon } from './poly';
 import ChartView from '../../view/Chart';
-import {prepareDataCoordInfo, getStackedOnPoint} from './helper';
-import {createGridClipPath, createPolarClipPath} from '../helper/createClipPathFromCoordSys';
+import { prepareDataCoordInfo, getStackedOnPoint } from './helper';
+import { createGridClipPath, createPolarClipPath } from '../helper/createClipPathFromCoordSys';
 import LineSeriesModel, { LineSeriesOption } from './LineSeries';
 import type GlobalModel from '../../model/Global';
 import type ExtensionAPI from '../../core/ExtensionAPI';
 // TODO
 import Cartesian2D from '../../coord/cartesian/Cartesian2D';
 import Polar from '../../coord/polar/Polar';
-import type List from '../../data/List';
+import type SeriesData from '../../data/SeriesData';
 import type {
     Payload,
     Dictionary,
@@ -48,20 +48,28 @@ import type {
 import type OrdinalScale from '../../scale/Ordinal';
 import type Axis2D from '../../coord/cartesian/Axis2D';
 import { CoordinateSystemClipArea, isCoordinateSystemType } from '../../coord/CoordinateSystem';
-import { setStatesStylesFromModel, setStatesFlag, enableHoverEmphasis } from '../../util/states';
+import { setStatesStylesFromModel, setStatesFlag, toggleHoverEmphasis, SPECIAL_STATES } from '../../util/states';
 import Model from '../../model/Model';
-import {setLabelStyle, getLabelStatesModels, labelInner} from '../../label/labelStyle';
-import {getDefaultLabel, getDefaultInterpolatedLabel} from '../helper/labelHelper';
+import { setLabelStyle, getLabelStatesModels, labelInner } from '../../label/labelStyle';
+import { getDefaultLabel, getDefaultInterpolatedLabel } from '../helper/labelHelper';
 
 import { getECData } from '../../util/innerStore';
 import { createFloat32Array } from '../../util/vendor';
 import { convertToColorString } from '../../util/format';
+import { lerp } from 'zrender/src/tool/color';
+import Element from 'zrender/src/Element';
+
 
 type PolarArea = ReturnType<Polar['getArea']>;
 type Cartesian2DArea = ReturnType<Cartesian2D['getArea']>;
-
 interface SymbolExtended extends SymbolClz {
     __temp: boolean
+}
+
+interface ColorStop {
+    offset: number
+    coord?: number
+    color: ColorString
 }
 
 function isPointsSame(points1: ArrayLike<number>, points2: ArrayLike<number>) {
@@ -116,12 +124,12 @@ function getBoundingDiff(points1: ArrayLike<number>, points2: ArrayLike<number>)
 }
 
 function getSmooth(smooth: number | boolean) {
-    return typeof smooth === 'number' ? smooth : (smooth ? 0.5 : 0);
+    return zrUtil.isNumber(smooth) ? smooth : (smooth ? 0.5 : 0);
 }
 
 function getStackedOnPoints(
     coordSys: Cartesian2D | Polar,
-    data: List,
+    data: SeriesData,
     dataCoordInfo: ReturnType<typeof prepareDataCoordInfo>
 ) {
     if (!dataCoordInfo.valueDim) {
@@ -139,10 +147,22 @@ function getStackedOnPoints(
     return points;
 }
 
+/**
+ * Filter the null data and extend data for step considering `stepTurnAt`
+ *
+ * @param points data to convert, that may containing null
+ * @param basePoints base data to reference, used only for areaStyle points
+ * @param coordSys coordinate system
+ * @param stepTurnAt 'start' | 'end' | 'middle' | true
+ * @param connectNulls whether to connect nulls
+ * @returns converted point positions
+ */
 function turnPointsIntoStep(
     points: ArrayLike<number>,
+    basePoints: ArrayLike<number> | null,
     coordSys: Cartesian2D | Polar,
-    stepTurnAt: 'start' | 'end' | 'middle'
+    stepTurnAt: 'start' | 'end' | 'middle',
+    connectNulls: boolean
 ): number[] {
     const baseAxis = coordSys.getBaseAxis();
     const baseIndex = baseAxis.dim === 'x' || baseAxis.dim === 'radius' ? 0 : 1;
@@ -152,7 +172,22 @@ function turnPointsIntoStep(
     const stepPt: number[] = [];
     const pt: number[] = [];
     const nextPt: number[] = [];
-    for (; i < points.length - 2; i += 2) {
+    const filteredPoints = [];
+    if (connectNulls) {
+        for (i = 0; i < points.length; i += 2) {
+            /**
+             * For areaStyle of stepped lines, `stackedOnPoints` should be
+             * filtered the same as `points` so that the base axis values
+             * should stay the same as the lines above. See #20021
+             */
+            const reference = basePoints || points;
+            if (!isNaN(reference[i]) && !isNaN(reference[i + 1])) {
+                filteredPoints.push(points[i], points[i + 1]);
+            }
+        }
+        points = filteredPoints;
+    }
+    for (i = 0; i < points.length - 2; i += 2) {
         nextPt[0] = points[i + 2];
         nextPt[1] = points[i + 3];
         pt[0] = points[i];
@@ -186,9 +221,62 @@ function turnPointsIntoStep(
     return stepPoints;
 }
 
+/**
+ * Clip color stops to edge. Avoid creating too large gradients.
+ * Which may lead to blurry when GPU acceleration is enabled. See #15680
+ *
+ * The stops has been sorted from small to large.
+ */
+function clipColorStops(colorStops: ColorStop[], maxSize: number): ColorStop[] {
+    const newColorStops: ColorStop[] = [];
+    const len = colorStops.length;
+    // coord will always < 0 in prevOutOfRangeColorStop.
+    let prevOutOfRangeColorStop: ColorStop;
+    let prevInRangeColorStop: ColorStop;
+
+    function lerpStop(stop0: ColorStop, stop1: ColorStop, clippedCoord: number) {
+        const coord0 = stop0.coord;
+        const p = (clippedCoord - coord0) / (stop1.coord - coord0);
+        const color = lerp(p, [stop0.color, stop1.color]) as string;
+        return { coord: clippedCoord, color } as ColorStop;
+    }
+
+    for (let i = 0; i < len; i++) {
+        const stop = colorStops[i];
+        const coord = stop.coord;
+        if (coord < 0) {
+            prevOutOfRangeColorStop = stop;
+        }
+        else if (coord > maxSize) {
+            if (prevInRangeColorStop) {
+                newColorStops.push(lerpStop(prevInRangeColorStop, stop, maxSize));
+            }
+            else if (prevOutOfRangeColorStop) { // If there are two stops and coord range is between these two stops
+                newColorStops.push(
+                    lerpStop(prevOutOfRangeColorStop, stop, 0),
+                    lerpStop(prevOutOfRangeColorStop, stop, maxSize)
+                );
+            }
+            // All following stop will be out of range. So just ignore them.
+            break;
+        }
+        else {
+            if (prevOutOfRangeColorStop) {
+                newColorStops.push(lerpStop(prevOutOfRangeColorStop, stop, 0));
+                // Reset
+                prevOutOfRangeColorStop = null;
+            }
+            newColorStops.push(stop);
+            prevInRangeColorStop = stop;
+        }
+    }
+    return newColorStops;
+}
+
 function getVisualGradient(
-    data: List,
-    coordSys: Cartesian2D | Polar
+    data: SeriesData,
+    coordSys: Cartesian2D | Polar,
+    api: ExtensionAPI
 ) {
     const visualMetaList = data.getVisual('visualMeta');
     if (!visualMetaList || !visualMetaList.length || !data.count()) {
@@ -207,9 +295,7 @@ function getVisualGradient(
     let visualMeta;
 
     for (let i = visualMetaList.length - 1; i >= 0; i--) {
-        const dimIndex = visualMetaList[i].dimension;
-        const dimName = data.dimensions[dimIndex];
-        const dimInfo = data.getDimensionInfo(dimName);
+        const dimInfo = data.getDimensionInfo(visualMetaList[i].dimension);
         coordDim = (dimInfo && dimInfo.coordDim) as 'x' | 'y';
         // Can only be x or y
         if (coordDim === 'x' || coordDim === 'y') {
@@ -234,18 +320,13 @@ function getVisualGradient(
 
     const axis = coordSys.getAxis(coordDim);
 
-    interface ColorStop {
-        offset: number
-        coord?: number
-        color: ColorString
-    }
-    // dataToCoor mapping may not be linear, but must be monotonic.
+    // dataToCoord mapping may not be linear, but must be monotonic.
     const colorStops: ColorStop[] = zrUtil.map(visualMeta.stops, function (stop) {
+        // offset will be calculated later.
         return {
-            offset: 0,
             coord: axis.toGlobalCoord(axis.dataToCoord(stop.value)),
             color: stop.color
-        };
+        } as ColorStop;
     });
     const stopLen = colorStops.length;
     const outerColors = visualMeta.outerColors.slice();
@@ -254,34 +335,40 @@ function getVisualGradient(
         colorStops.reverse();
         outerColors.reverse();
     }
+    const colorStopsInRange = clipColorStops(
+        colorStops, coordDim === 'x' ? api.getWidth() : api.getHeight()
+    );
+    const inRangeStopLen = colorStopsInRange.length;
+    if (!inRangeStopLen && stopLen) {
+        // All stops are out of range. All will be the same color.
+        return colorStops[0].coord < 0
+            ? (outerColors[1] ? outerColors[1] : colorStops[stopLen - 1].color)
+            : (outerColors[0] ? outerColors[0] : colorStops[0].color);
+    }
 
     const tinyExtent = 10; // Arbitrary value: 10px
-    const minCoord = colorStops[0].coord - tinyExtent;
-    const maxCoord = colorStops[stopLen - 1].coord + tinyExtent;
+    const minCoord = colorStopsInRange[0].coord - tinyExtent;
+    const maxCoord = colorStopsInRange[inRangeStopLen - 1].coord + tinyExtent;
     const coordSpan = maxCoord - minCoord;
 
     if (coordSpan < 1e-3) {
         return 'transparent';
     }
 
-    zrUtil.each(colorStops, function (stop) {
+    zrUtil.each(colorStopsInRange, function (stop) {
         stop.offset = (stop.coord - minCoord) / coordSpan;
     });
-    colorStops.push({
-        offset: stopLen ? colorStops[stopLen - 1].offset : 0.5,
+    colorStopsInRange.push({
+        // NOTE: inRangeStopLen may still be 0 if stoplen is zero.
+        offset: inRangeStopLen ? colorStopsInRange[inRangeStopLen - 1].offset : 0.5,
         color: outerColors[1] || 'transparent'
     });
-    colorStops.unshift({ // notice colorStops.length have been changed.
-        offset: stopLen ? colorStops[0].offset : 0.5,
+    colorStopsInRange.unshift({ // notice newColorStops.length have been changed.
+        offset: inRangeStopLen ? colorStopsInRange[0].offset : 0.5,
         color: outerColors[0] || 'transparent'
     });
 
-    // zrUtil.each(colorStops, function (colorStop) {
-    //     // Make sure each offset has rounded px to avoid not sharp edge
-    //     colorStop.offset = (Math.round(colorStop.offset * (end - start) + start) - start) / (end - start);
-    // });
-
-    const gradient = new graphic.LinearGradient(0, 0, 0, 0, colorStops, true);
+    const gradient = new graphic.LinearGradient(0, 0, 0, 0, colorStopsInRange, true);
     gradient[coordDim] = minCoord;
     gradient[coordDim + '2' as 'x2' | 'y2'] = maxCoord;
 
@@ -290,7 +377,7 @@ function getVisualGradient(
 
 function getIsIgnoreFunc(
     seriesModel: LineSeriesModel,
-    data: List,
+    data: SeriesData,
     coordSys: Cartesian2D
 ) {
     const showAllSymbol = seriesModel.get('showAllSymbol');
@@ -332,9 +419,9 @@ function getIsIgnoreFunc(
 
 function canShowAllSymbolForCategory(
     categoryAxis: Axis2D,
-    data: List
+    data: SeriesData
 ) {
-    // In mose cases, line is monotonous on category axis, and the label size
+    // In most cases, line is monotonous on category axis, and the label size
     // is close with each other. So we check the symbol size and some of the
     // label size alone with the category axis to estimate whether all symbol
     // can be shown without overlap.
@@ -347,9 +434,9 @@ function canShowAllSymbolForCategory(
     const step = Math.max(1, Math.round(dataLen / 5));
     for (let dataIndex = 0; dataIndex < dataLen; dataIndex += step) {
         if (SymbolClz.getSymbolSize(
-                data, dataIndex
+            data, dataIndex
             // Only for cartesian, where `isHorizontal` exists.
-            )[categoryAxis.isHorizontal() ? 1 : 0]
+        )[categoryAxis.isHorizontal() ? 1 : 0]
             // Empirical number
             * 1.5 > availSize
         ) {
@@ -412,6 +499,20 @@ function getIndexRange(points: ArrayLike<number>, xOrY: number, dim: 'x' | 'y') 
     };
 }
 
+function anyStateShowEndLabel(
+    seriesModel: LineSeriesModel
+) {
+    if (seriesModel.get(['endLabel', 'show'])) {
+        return true;
+    }
+    for (let i = 0; i < SPECIAL_STATES.length; i++) {
+        if (seriesModel.get([SPECIAL_STATES[i], 'endLabel', 'show'])) {
+            return true;
+        }
+    }
+    return false;
+}
+
 
 interface EndLabelAnimationRecord {
     lastFrameIndex: number
@@ -427,13 +528,12 @@ function createLineClipPath(
 ) {
     if (isCoordinateSystemType<Cartesian2D>(coordSys, 'cartesian2d')) {
         const endLabelModel = seriesModel.getModel('endLabel');
-        const showEndLabel = endLabelModel.get('show');
         const valueAnimation = endLabelModel.get('valueAnimation');
         const data = seriesModel.getData();
 
         const labelAnimationRecord: EndLabelAnimationRecord = { lastFrameIndex: 0 };
 
-        const during = showEndLabel
+        const during = anyStateShowEndLabel(seriesModel)
             ? (percent: number, clipRect: graphic.Rect) => {
                 lineView._endLabelOnDuring(
                     percent,
@@ -531,7 +631,7 @@ class LineView extends ChartView {
 
     _clipShapeForSymbol: CoordinateSystemClipArea;
 
-    _data: List;
+    _data: SeriesData;
 
     init() {
         const lineGroup = new graphic.Group();
@@ -541,6 +641,8 @@ class LineView extends ChartView {
 
         this._symbolDraw = symbolDraw;
         this._lineGroup = lineGroup;
+
+        this._changePolyState = zrUtil.bind(this._changePolyState, this);
     }
 
     render(seriesModel: LineSeriesModel, ecModel: GlobalModel, api: ExtensionAPI) {
@@ -561,7 +663,7 @@ class LineView extends ChartView {
 
         const lineGroup = this._lineGroup;
 
-        const hasAnimation = seriesModel.get('animation');
+        const hasAnimation = !ecModel.ssr && seriesModel.get('animation');
 
         const isAreaChart = !areaStyleModel.isEmpty();
 
@@ -571,6 +673,8 @@ class LineView extends ChartView {
         let stackedOnPoints = isAreaChart && getStackedOnPoints(coordSys, data, dataCoordInfo);
 
         const showSymbol = seriesModel.get('showSymbol');
+
+        const connectNulls = seriesModel.get('connectNulls');
 
         const isIgnoreFunc = showSymbol && !isCoordSysPolar
             && getIsIgnoreFunc(seriesModel, data, coordSys as Cartesian2D);
@@ -610,7 +714,7 @@ class LineView extends ChartView {
             }
         }
         this._clipShapeForSymbol = clipShapeForSymbol;
-        const visualColor = getVisualGradient(data, coordSys)
+        const visualColor = getVisualGradient(data, coordSys, api)
             || data.getVisual('style')[data.getVisual('drawType')];
         // Initialization animation or coordinate system changed
         if (
@@ -632,12 +736,11 @@ class LineView extends ChartView {
             );
 
             if (step) {
-                // TODO If stacked series is not step
-                points = turnPointsIntoStep(points, coordSys, step);
-
                 if (stackedOnPoints) {
-                    stackedOnPoints = turnPointsIntoStep(stackedOnPoints, coordSys, step);
+                    stackedOnPoints = turnPointsIntoStep(stackedOnPoints, points, coordSys, step, connectNulls);
                 }
+                // TODO If stacked series is not step
+                points = turnPointsIntoStep(points, null, coordSys, step, connectNulls);
             }
 
             polyline = this._newPolyline(points);
@@ -645,6 +748,10 @@ class LineView extends ChartView {
                 polygon = this._newPolygon(
                     points, stackedOnPoints
                 );
+            }// If areaStyle is removed
+            else if (polygon) {
+                lineGroup.remove(polygon);
+                polygon = this._polygon = null;
             }
 
             // NOTE: Must update _endLabel before setClipPath.
@@ -675,12 +782,21 @@ class LineView extends ChartView {
             }
 
             // Update clipPath
-            lineGroup.setClipPath(
-                createLineClipPath(this, coordSys, false, seriesModel)
-            );
+            const oldClipPath = lineGroup.getClipPath();
+            if (oldClipPath) {
+                const newClipPath = createLineClipPath(this, coordSys, false, seriesModel);
+                graphic.initProps(oldClipPath, {
+                    shape: newClipPath.shape
+                }, seriesModel);
+            }
+            else {
+                lineGroup.setClipPath(
+                    createLineClipPath(this, coordSys, true, seriesModel)
+                );
+            }
 
             // Always update, or it is wrong in the case turning on legend
-            // because points are not changed
+            // because points are not changed.
             showSymbol && symbolDraw.updateData(data, {
                 isIgnore: isIgnoreFunc,
                 clipShape: clipShapeForSymbol,
@@ -690,24 +806,24 @@ class LineView extends ChartView {
                 }
             });
 
-            // In the case data zoom triggerred refreshing frequently
-            // Data may not change if line has a category axis. So it should animate nothing
+            // In the case data zoom triggered refreshing frequently
+            // Data may not change if line has a category axis. So it should animate nothing.
             if (!isPointsSame(this._stackedOnPoints, stackedOnPoints)
                 || !isPointsSame(this._points, points)
             ) {
                 if (hasAnimation) {
                     this._doUpdateAnimation(
-                        data, stackedOnPoints, coordSys, api, step, valueOrigin
+                        data, stackedOnPoints, coordSys, api, step, valueOrigin, connectNulls
                     );
                 }
                 else {
                     // Not do it in update with animation
                     if (step) {
-                        // TODO If stacked series is not step
-                        points = turnPointsIntoStep(points, coordSys, step);
                         if (stackedOnPoints) {
-                            stackedOnPoints = turnPointsIntoStep(stackedOnPoints, coordSys, step);
+                            stackedOnPoints = turnPointsIntoStep(stackedOnPoints, points, coordSys, step, connectNulls);
                         }
+                        // TODO If stacked series is not step
+                        points = turnPointsIntoStep(points, null, coordSys, step, connectNulls);
                     }
 
                     polyline.setShape({
@@ -721,8 +837,10 @@ class LineView extends ChartView {
             }
         }
 
-        const focus = seriesModel.get(['emphasis', 'focus']);
-        const blurScope = seriesModel.get(['emphasis', 'blurScope']);
+        const emphasisModel = seriesModel.getModel('emphasis');
+        const focus = emphasisModel.get('focus');
+        const blurScope = emphasisModel.get('blurScope');
+        const emphasisDisabled = emphasisModel.get('disabled');
 
         polyline.useStyle(zrUtil.defaults(
             // Use color in lineStyle first
@@ -743,11 +861,11 @@ class LineView extends ChartView {
 
         // Needs seriesIndex for focus
         getECData(polyline).seriesIndex = seriesModel.seriesIndex;
-        enableHoverEmphasis(polyline, focus, blurScope);
+        toggleHoverEmphasis(polyline, focus, blurScope, emphasisDisabled);
 
         const smooth = getSmooth(seriesModel.get('smooth'));
         const smoothMonotone = seriesModel.get('smoothMonotone');
-        const connectNulls = seriesModel.get('connectNulls');
+
         polyline.setShape({
             smooth,
             smoothMonotone,
@@ -782,12 +900,10 @@ class LineView extends ChartView {
             setStatesStylesFromModel(polygon, seriesModel, 'areaStyle');
             // Needs seriesIndex for focus
             getECData(polygon).seriesIndex = seriesModel.seriesIndex;
-            enableHoverEmphasis(polygon, focus, blurScope);
+            toggleHoverEmphasis(polygon, focus, blurScope, emphasisDisabled);
         }
 
-        const changePolyState = (toState: DisplayState) => {
-            this._changePolyState(toState);
-        };
+        const changePolyState = this._changePolyState;
 
         data.eachItemGraphicEl(function (el) {
             // Switch polyline / polygon state if element changed its state.
@@ -803,9 +919,23 @@ class LineView extends ChartView {
         this._points = points;
         this._step = step;
         this._valueOrigin = valueOrigin;
+
+        if (seriesModel.get('triggerLineEvent')) {
+            this.packEventData(seriesModel, polyline);
+            polygon && this.packEventData(seriesModel, polygon);
+        }
     }
 
-    dispose() {}
+    private packEventData(seriesModel: LineSeriesModel, el: Element) {
+        getECData(el).eventData = {
+            componentType: 'series',
+            componentSubType: 'line',
+            componentIndex: seriesModel.componentIndex,
+            seriesIndex: seriesModel.seriesIndex,
+            seriesName: seriesModel.name,
+            seriesType: 'line'
+        };
+    }
 
     highlight(
         seriesModel: LineSeriesModel,
@@ -829,21 +959,24 @@ class LineView extends ChartView {
                     // Null data
                     return;
                 }
-                // fix #11360: should't draw symbol outside clipShapeForSymbol
+                // fix #11360: shouldn't draw symbol outside clipShapeForSymbol
                 if (this._clipShapeForSymbol && !this._clipShapeForSymbol.contain(x, y)) {
                     return;
                 }
+                const zlevel = seriesModel.get('zlevel') || 0;
+                const z = seriesModel.get('z') || 0;
                 symbol = new SymbolClz(data, dataIndex);
                 symbol.x = x;
                 symbol.y = y;
-                symbol.setZ(
-                    seriesModel.get('zlevel'),
-                    seriesModel.get('z')
-                );
+                symbol.setZ(zlevel, z);
 
-                // ensure label text of the temporal symbol is on the top of line and area polygon
+                // ensure label text of the temporary symbol is in front of line and area polygon
                 const symbolLabel = symbol.getSymbolPath().getTextContent();
-                symbolLabel && (symbolLabel.z2 = this._polyline.z2 + 1);
+                if (symbolLabel) {
+                    symbolLabel.zlevel = zlevel;
+                    symbolLabel.z = z;
+                    symbolLabel.z2 = this._polyline.z2 + 1;
+                }
 
                 (symbol as SymbolExtended).__temp = true;
                 data.setItemGraphicEl(dataIndex, symbol);
@@ -946,7 +1079,7 @@ class LineView extends ChartView {
     }
 
     _initSymbolLabelAnimation(
-        data: List,
+        data: SeriesData,
         coordSys: Polar | Cartesian2D,
         clipShape: PolarArea | Cartesian2DArea
     ) {
@@ -965,13 +1098,13 @@ class LineView extends ChartView {
 
         const seriesModel = data.hostModel;
         let seriesDuration = seriesModel.get('animationDuration');
-        if (typeof seriesDuration === 'function') {
+        if (zrUtil.isFunction(seriesDuration)) {
             seriesDuration = seriesDuration(null);
         }
-        const seriesDalay = seriesModel.get('animationDelay') || 0;
-        const seriesDalayValue = typeof seriesDalay === 'function'
-            ? seriesDalay(null)
-            : seriesDalay;
+        const seriesDelay = seriesModel.get('animationDelay') || 0;
+        const seriesDelayValue = zrUtil.isFunction(seriesDelay)
+            ? seriesDelay(null)
+            : seriesDelay;
 
         data.eachItemGraphicEl(function (symbol: SymbolExtended, idx) {
             const el = symbol;
@@ -980,31 +1113,33 @@ class LineView extends ChartView {
                 let start;
                 let end;
                 let current;
-                if (isCoordSysPolar) {
-                    const polarClip = clipShape as PolarArea;
-                    const coord = (coordSys as Polar).pointToCoord(point);
-                    if (isHorizontalOrRadial) {
-                        start = polarClip.startAngle;
-                        end = polarClip.endAngle;
-                        current = -coord[1] / 180 * Math.PI;
+                if (clipShape) {
+                    if (isCoordSysPolar) {
+                        const polarClip = clipShape as PolarArea;
+                        const coord = (coordSys as Polar).pointToCoord(point);
+                        if (isHorizontalOrRadial) {
+                            start = polarClip.startAngle;
+                            end = polarClip.endAngle;
+                            current = -coord[1] / 180 * Math.PI;
+                        }
+                        else {
+                            start = polarClip.r0;
+                            end = polarClip.r;
+                            current = coord[0];
+                        }
                     }
                     else {
-                        start = polarClip.r0;
-                        end = polarClip.r;
-                        current = coord[0];
-                    }
-                }
-                else {
-                    const gridClip = clipShape as Cartesian2DArea;
-                    if (isHorizontalOrRadial) {
-                        start = gridClip.x;
-                        end = gridClip.x + gridClip.width;
-                        current = symbol.x;
-                    }
-                    else {
-                        start = gridClip.y + gridClip.height;
-                        end = gridClip.y;
-                        current = symbol.y;
+                        const gridClip = clipShape as Cartesian2DArea;
+                        if (isHorizontalOrRadial) {
+                            start = gridClip.x;
+                            end = gridClip.x + gridClip.width;
+                            current = symbol.x;
+                        }
+                        else {
+                            start = gridClip.y + gridClip.height;
+                            end = gridClip.y;
+                            current = symbol.y;
+                        }
                     }
                 }
                 let ratio = end === start ? 0 : (current - start) / (end - start);
@@ -1012,18 +1147,19 @@ class LineView extends ChartView {
                     ratio = 1 - ratio;
                 }
 
-                const delay = typeof seriesDalay === 'function' ? seriesDalay(idx)
-                    : (seriesDuration * ratio) + seriesDalayValue;
+                const delay = zrUtil.isFunction(seriesDelay) ? seriesDelay(idx)
+                    : (seriesDuration * ratio) + seriesDelayValue;
 
                 const symbolPath = el.getSymbolPath();
                 const text = symbolPath.getTextContent();
 
-                el.attr({ scaleX: 0, scaleY: 0});
+                el.attr({ scaleX: 0, scaleY: 0 });
                 el.animateTo({
                     scaleX: 1,
                     scaleY: 1
                 }, {
                     duration: 200,
+                    setToFinal: true,
                     delay: delay
                 });
 
@@ -1050,9 +1186,16 @@ class LineView extends ChartView {
     ) {
         const endLabelModel = seriesModel.getModel('endLabel');
 
-        if (endLabelModel.get('show')) {
+        if (anyStateShowEndLabel(seriesModel)) {
             const data = seriesModel.getData();
             const polyline = this._polyline;
+            // series may be filtered.
+            const points = data.getLayout('points');
+            if (!points) {
+                polyline.removeTextContent();
+                this._endLabel = null;
+                return;
+            }
             let endLabel = this._endLabel;
             if (!endLabel) {
                 endLabel = this._endLabel = new graphic.Text({
@@ -1064,7 +1207,7 @@ class LineView extends ChartView {
             }
 
             // Find last non-NaN data to display data
-            const dataIndex = getLastIndexNotNull(data.getLayout('points'));
+            const dataIndex = getLastIndexNotNull(points);
             if (dataIndex >= 0) {
                 setLabelStyle(
                     polyline,
@@ -1094,7 +1237,7 @@ class LineView extends ChartView {
     _endLabelOnDuring(
         percent: number,
         clipRect: graphic.Rect,
-        data: List,
+        data: SeriesData,
         animationRecord: EndLabelAnimationRecord,
         valueAnimation: boolean,
         endLabelModel: Model<LabelOption>,
@@ -1112,6 +1255,7 @@ class LineView extends ChartView {
             }
 
             const points = data.getLayout('points');
+
             const seriesModel = data.hostModel as LineSeriesModel;
             const connectNulls = seriesModel.get('connectNulls');
             const precision = endLabelModel.get('precision');
@@ -1171,7 +1315,10 @@ class LineView extends ChartView {
                 });
             }
             if (valueAnimation) {
-                labelInner(endLabel).setLabelText(value);
+                const inner = labelInner(endLabel);
+                if (typeof inner.setLabelText === 'function') {
+                    inner.setLabelText(value);
+                }
             }
         }
     }
@@ -1181,12 +1328,13 @@ class LineView extends ChartView {
      */
     // FIXME Two value axis
     _doUpdateAnimation(
-        data: List,
+        data: SeriesData,
         stackedOnPoints: ArrayLike<number>,
         coordSys: Cartesian2D | Polar,
         api: ExtensionAPI,
         step: LineSeriesOption['step'],
-        valueOrigin: LineSeriesOption['areaStyle']['origin']
+        valueOrigin: LineSeriesOption['areaStyle']['origin'],
+        connectNulls: boolean
     ) {
         const polyline = this._polyline;
         const polygon = this._polygon;
@@ -1205,22 +1353,23 @@ class LineView extends ChartView {
         let stackedOnNext = diff.stackedOnNext;
         if (step) {
             // TODO If stacked series is not step
-            current = turnPointsIntoStep(diff.current, coordSys, step);
-            stackedOnCurrent = turnPointsIntoStep(diff.stackedOnCurrent, coordSys, step);
-            next = turnPointsIntoStep(diff.next, coordSys, step);
-            stackedOnNext = turnPointsIntoStep(diff.stackedOnNext, coordSys, step);
+            stackedOnCurrent = turnPointsIntoStep(diff.stackedOnCurrent, diff.current, coordSys, step, connectNulls);
+            current = turnPointsIntoStep(diff.current, null, coordSys, step, connectNulls);
+            stackedOnNext = turnPointsIntoStep(diff.stackedOnNext, diff.next, coordSys, step, connectNulls);
+            next = turnPointsIntoStep(diff.next, null, coordSys, step, connectNulls);
         }
-
         // Don't apply animation if diff is large.
         // For better result and avoid memory explosion problems like
         // https://github.com/apache/incubator-echarts/issues/12229
         if (getBoundingDiff(current, next) > 3000
             || (polygon && getBoundingDiff(stackedOnCurrent, stackedOnNext) > 3000)
         ) {
+            polyline.stopAnimation();
             polyline.setShape({
                 points: next
             });
             if (polygon) {
+                polygon.stopAnimation();
                 polygon.setShape({
                     points: next,
                     stackedOnPoints: stackedOnNext
@@ -1265,7 +1414,6 @@ class LineView extends ChartView {
             }
         }
 
-
         const updatedDataInfo: {
             el: SymbolExtended,
             ptIdx: number
@@ -1284,7 +1432,6 @@ class LineView extends ChartView {
                 }
             }
         }
-
         if (polyline.animators && polyline.animators.length) {
             polyline.animators[0].during(function () {
                 polygon && polygon.dirtyShape();

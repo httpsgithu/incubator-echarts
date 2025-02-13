@@ -18,16 +18,16 @@
 */
 
 import * as graphic from '../../util/graphic';
-import { setStatesStylesFromModel, enableHoverEmphasis } from '../../util/states';
+import { setStatesStylesFromModel, toggleHoverEmphasis } from '../../util/states';
 import ChartView from '../../view/Chart';
 import FunnelSeriesModel, {FunnelDataItemOption} from './FunnelSeries';
 import GlobalModel from '../../model/Global';
 import ExtensionAPI from '../../core/ExtensionAPI';
-import List from '../../data/List';
+import SeriesData from '../../data/SeriesData';
 import { ColorString } from '../../util/types';
 import { setLabelLineStyle, getLabelLineStatesModels } from '../../label/labelGuideHelper';
 import { setLabelStyle, getLabelStatesModels } from '../../label/labelStyle';
-import { retrieveVisualColorForTooltipMarker } from '../../component/tooltip/tooltipMarkup';
+import { saveOldStyle } from '../../animation/basicTransition';
 
 const opacityAccessPath = ['itemStyle', 'opacity'] as const;
 
@@ -36,7 +36,7 @@ const opacityAccessPath = ['itemStyle', 'opacity'] as const;
  */
 class FunnelPiece extends graphic.Polygon {
 
-    constructor(data: List, idx: number) {
+    constructor(data: SeriesData, idx: number) {
         super();
 
         const polygon = this;
@@ -48,7 +48,7 @@ class FunnelPiece extends graphic.Polygon {
         this.updateData(data, idx, true);
     }
 
-    updateData(data: List, idx: number, firstCreate?: boolean) {
+    updateData(data: SeriesData, idx: number, firstCreate?: boolean) {
 
         const polygon = this;
 
@@ -59,7 +59,9 @@ class FunnelPiece extends graphic.Polygon {
         let opacity = itemModel.get(opacityAccessPath);
         opacity = opacity == null ? 1 : opacity;
 
-
+        if (!firstCreate) {
+            saveOldStyle(polygon);
+        }
         // Update common style
         polygon.useStyle(data.getItemVisual(idx, 'style'));
         polygon.style.lineJoin = 'round';
@@ -90,10 +92,15 @@ class FunnelPiece extends graphic.Polygon {
 
         this._updateLabel(data, idx);
 
-        enableHoverEmphasis(this, emphasisModel.get('focus'), emphasisModel.get('blurScope'));
+        toggleHoverEmphasis(
+            this,
+            emphasisModel.get('focus'),
+            emphasisModel.get('blurScope'),
+            emphasisModel.get('disabled')
+        );
     }
 
-    _updateLabel(data: List, idx: number) {
+    _updateLabel(data: SeriesData, idx: number) {
         const polygon = this;
         const labelLine = this.getTextGuideLine();
         const labelText = polygon.getTextContent();
@@ -166,7 +173,7 @@ class FunnelView extends ChartView {
     static type = 'funnel' as const;
     type = FunnelView.type;
 
-    private _data: List;
+    private _data: SeriesData;
 
     ignoreLabelLineUpdate = true;
 

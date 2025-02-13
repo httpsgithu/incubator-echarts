@@ -28,7 +28,7 @@ import Scale from '../scale/Scale';
 import { DimensionName, ScaleDataValue, ScaleTick } from '../util/types';
 import OrdinalScale from '../scale/Ordinal';
 import Model from '../model/Model';
-import { AxisBaseOption, OptionAxisType } from './axisCommonTypes';
+import { AxisBaseOption, CategoryAxisBaseOption, OptionAxisType } from './axisCommonTypes';
 import { AxisBaseModel } from './AxisBaseModel';
 
 const NORMALIZED_EXTENT = [0, 1] as [number, number];
@@ -63,7 +63,7 @@ class Axis {
 
     // Injected outside
     model: AxisBaseModel;
-    onBand: AxisBaseOption['boundaryGap'] = false;
+    onBand: CategoryAxisBaseOption['boundaryGap'] = false;
     inverse: AxisBaseOption['inverse'] = false;
 
 
@@ -232,7 +232,7 @@ class Axis {
      * Notice here we only get the default tick model. For splitLine
      * or splitArea, we should pass the splitLineModel or splitAreaModel
      * manually when calling `getTicksCoords`.
-     * In GL, this method may be overrided to:
+     * In GL, this method may be overridden to:
      * `axisModel.getModel('axisTick', grid3DModel.getModel('axisTick'));`
      */
     getTickModel(): Model {
@@ -262,7 +262,7 @@ class Axis {
 
     /**
      * Only be called in category axis.
-     * Can be overrided, consider other axes like in 3D.
+     * Can be overridden, consider other axes like in 3D.
      * @return Auto interval for cateogry axis tick and label
      */
     calculateCategoryInterval(): ReturnType<typeof calculateCategoryInterval> {
@@ -302,7 +302,7 @@ function fixOnBandTicksCoords(
     let diffSize;
     if (ticksLen === 1) {
         ticksCoords[0].coord = axisExtent[0];
-        last = ticksCoords[1] = {coord: axisExtent[0]};
+        last = ticksCoords[1] = {coord: axisExtent[1], tickValue: ticksCoords[0].tickValue};
     }
     else {
         const crossLen = ticksCoords[ticksLen - 1].tickValue - ticksCoords[0].tickValue;
@@ -315,7 +315,7 @@ function fixOnBandTicksCoords(
         const dataExtent = axis.scale.getExtent();
         diffSize = 1 + dataExtent[1] - ticksCoords[ticksLen - 1].tickValue;
 
-        last = {coord: ticksCoords[ticksLen - 1].coord + shift * diffSize};
+        last = {coord: ticksCoords[ticksLen - 1].coord + shift * diffSize, tickValue: dataExtent[1] + 1};
 
         ticksCoords.push(last);
     }
@@ -338,7 +338,7 @@ function fixOnBandTicksCoords(
 
     function littleThan(a: number, b: number): boolean {
         // Avoid rounding error cause calculated tick coord different with extent.
-        // It may cause an extra unecessary tick added.
+        // It may cause an extra unnecessary tick added.
         a = round(a);
         b = round(b);
         return inverse ? a > b : a < b;

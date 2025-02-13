@@ -26,6 +26,8 @@ import { ParsedModelFinder, ParsedModelFinderKnown } from '../../util/model';
 import { ScaleDataValue } from '../../util/types';
 import ExtensionAPI from '../../core/ExtensionAPI';
 
+export const polarDimensions = ['radius', 'angle'];
+
 interface Polar {
     update(ecModel: GlobalModel, api: ExtensionAPI): void
 }
@@ -33,7 +35,7 @@ class Polar implements CoordinateSystem, CoordinateSystemMaster {
 
     readonly name: string;
 
-    readonly dimensions = ['radius', 'angle'];
+    readonly dimensions = polarDimensions;
 
     readonly type = 'polar';
 
@@ -212,7 +214,7 @@ class Polar implements CoordinateSystem, CoordinateSystemMaster {
         const angleExtent = angleAxis.getExtent();
 
         const RADIAN = Math.PI / 180;
-
+        const EPSILON = 1e-4;
         return {
             cx: this.cx,
             cy: this.cy,
@@ -230,7 +232,9 @@ class Polar implements CoordinateSystem, CoordinateSystemMaster {
                 const r = this.r;
                 const r0 = this.r0;
 
-                return d2 <= r * r && d2 >= r0 * r0;
+                // minus a tiny value 1e-4 in double side to avoid being clipped unexpectedly
+                // r == r0 contain nothing
+                return r !== r0 && (d2 - EPSILON) <= r * r && (d2 + EPSILON) >= r0 * r0;
             }
         };
     }

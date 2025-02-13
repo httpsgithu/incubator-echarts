@@ -87,6 +87,11 @@ import {
     TransformComponent
 } from './export/components';
 
+import {
+    UniversalTransition,
+    LabelLayout
+} from './export/features';
+
 
 // -----------------
 // Render engines
@@ -196,7 +201,7 @@ use(SingleAxisComponent);
 use(ParallelComponent);
 
 // `calendar` coordinate system. for example,
-// chart.setOptionp({
+// chart.setOption({
 //     calendar: {...},
 //     series: [{
 //         coordinateSystem: 'calendar'
@@ -290,7 +295,7 @@ use(LegendComponent);
 use(DataZoomComponent);
 
 // `dataZoom` component providing drag, pinch, wheel behaviors
-// inside coodinate system, for example:
+// inside coordinate system, for example:
 // chart.setOption({
 //     dataZoom: {type: 'inside'}
 // });
@@ -302,7 +307,7 @@ use(DataZoomInsideComponent);
 // });
 use(DataZoomSliderComponent);
 
-// `dataZoom` component including both `visualMapContinuous` and `visualMapPiecewise`.
+// `visualMap` component including both `visualMapContinuous` and `visualMapPiecewise`.
 use(VisualMapComponent);
 
 // `visualMap` component providing continuous bar, for example:
@@ -333,3 +338,19 @@ use(AriaComponent);
 use(TransformComponent);
 
 use(DatasetComponent);
+
+// universal transition
+// chart.setOption({
+//     series: {
+//         universalTransition: { enabled: true }
+//     }
+// })
+use(UniversalTransition);
+
+// label layout
+// chart.setOption({
+//     series: {
+//         labelLayout: { hideOverlap: true }
+//     }
+// })
+use(LabelLayout);

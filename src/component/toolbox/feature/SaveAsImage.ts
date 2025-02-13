@@ -17,7 +17,7 @@
 * under the License.
 */
 
-/* global Uint8Array */
+/* global window, Uint8Array, document */
 
 import env from 'zrender/src/core/env';
 import { ToolboxFeature, ToolboxFeatureOption } from '../featureManager';
@@ -28,7 +28,7 @@ import ExtensionAPI from '../../../core/ExtensionAPI';
 export interface ToolboxSaveAsImageFeatureOption extends ToolboxFeatureOption {
     icon?: string
     title?: string
-    type?: 'png' | 'jpg'
+    type?: 'png' | 'jpeg'
 
     backgroundColor?: ZRColor
     connectedBackgroundColor?: ZRColor
@@ -56,8 +56,9 @@ class SaveAsImage extends ToolboxFeature<ToolboxSaveAsImageFeatureOption> {
             excludeComponents: model.get('excludeComponents'),
             pixelRatio: model.get('pixelRatio')
         });
+        const browser = env.browser;
         // Chrome, Firefox, New Edge
-        if (typeof MouseEvent === 'function' && (env.browser.newEdge || (!env.browser.ie && !env.browser.edge))) {
+        if (typeof MouseEvent === 'function' && (browser.newEdge || (!browser.ie && !browser.edge))) {
             const $a = document.createElement('a');
             $a.download = title + '.' + type;
             $a.target = '_blank';
@@ -72,6 +73,7 @@ class SaveAsImage extends ToolboxFeature<ToolboxSaveAsImageFeatureOption> {
         }
         // IE or old Edge
         else {
+            // @ts-ignore
             if (window.navigator.msSaveOrOpenBlob || isSvg) {
                 const parts = url.split(',');
                 // data:[<mime type>][;charset=<charset>][;base64],<encoded data>
@@ -84,15 +86,16 @@ class SaveAsImage extends ToolboxFeature<ToolboxSaveAsImageFeatureOption> {
                 // otherwise, like `svg` data uri exported by zrender,
                 // there will be an error, for it's not encoded with base64.
                 // (just a url-encoded string through `encodeURIComponent`)
-                base64Encoded && (bstr = atob(bstr));
+                base64Encoded && (bstr = window.atob(bstr));
                 const filename = title + '.' + type;
+                // @ts-ignore
                 if (window.navigator.msSaveOrOpenBlob) {
                     let n = bstr.length;
                     const u8arr = new Uint8Array(n);
                     while (n--) {
                         u8arr[n] = bstr.charCodeAt(n);
                     }
-                    const blob = new Blob([u8arr]);
+                    const blob = new Blob([u8arr]);// @ts-ignore
                     window.navigator.msSaveOrOpenBlob(blob, filename);
                 }
                 else {
@@ -125,7 +128,7 @@ class SaveAsImage extends ToolboxFeature<ToolboxSaveAsImageFeatureOption> {
          const defaultOption: ToolboxSaveAsImageFeatureOption = {
             show: true,
             icon: 'M4.7,22.9L29.3,45.5L54.7,23.4M4.6,43.6L4.6,58L53.8,58L53.8,43.6M29.2,45.1L29.2,0',
-            title: ecModel.getLocale(['toolbox', 'saveAsImage', 'title']),
+            title: ecModel.getLocaleModel().get(['toolbox', 'saveAsImage', 'title']),
             type: 'png',
             // Default use option.backgroundColor
             // backgroundColor: '#fff',
@@ -134,13 +137,11 @@ class SaveAsImage extends ToolboxFeature<ToolboxSaveAsImageFeatureOption> {
             excludeComponents: ['toolbox'],
             // use current pixel ratio of device by default
             // pixelRatio: 1,
-            lang: ecModel.getLocale(['toolbox', 'saveAsImage', 'lang'])
+            lang: ecModel.getLocaleModel().get(['toolbox', 'saveAsImage', 'lang'])
         };
 
         return defaultOption;
     }
 }
-
-SaveAsImage.prototype.unusable = !env.canvasSupported;
 
 export default SaveAsImage;

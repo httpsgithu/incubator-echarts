@@ -27,7 +27,6 @@ import SingleAxisModel from '../../coord/single/AxisModel';
 import GlobalModel from '../../model/Global';
 import ExtensionAPI from '../../core/ExtensionAPI';
 import { Payload } from '../../util/types';
-import ComponentView from '../../view/Component';
 
 const axisBuilderAttrs = [
     'axisLine', 'axisTickLabel', 'axisName'
@@ -94,8 +93,8 @@ const axisElementBuilders: Record<typeof selfBuilderAttrs[number], AxisElementBu
         const splitLineModel = axisModel.getModel('splitLine');
         const lineStyleModel = splitLineModel.getModel('lineStyle');
         let lineColors = lineStyleModel.get('color');
-
         lineColors = lineColors instanceof Array ? lineColors : [lineColors];
+        const lineWidth = lineStyleModel.get('width');
 
         const gridRect = axisModel.coordinateSystem.getRect();
         const isHorizontal = axis.isHorizontal();
@@ -124,10 +123,8 @@ const axisElementBuilders: Record<typeof selfBuilderAttrs[number], AxisElementBu
                 p2[0] = gridRect.x + gridRect.width;
                 p2[1] = tickCoord;
             }
-            const colorIndex = (lineCount++) % lineColors.length;
-            splitLines[colorIndex] = splitLines[colorIndex] || [];
-            splitLines[colorIndex].push(new graphic.Line({
-                subPixelOptimize: true,
+
+            const line = new graphic.Line({
                 shape: {
                     x1: p1[0],
                     y1: p1[1],
@@ -135,7 +132,12 @@ const axisElementBuilders: Record<typeof selfBuilderAttrs[number], AxisElementBu
                     y2: p2[1]
                 },
                 silent: true
-            }));
+            });
+            graphic.subPixelOptimizeLine(line.shape, lineWidth);
+
+            const colorIndex = (lineCount++) % lineColors.length;
+            splitLines[colorIndex] = splitLines[colorIndex] || [];
+            splitLines[colorIndex].push(line);
         }
 
         const lineStyle = lineStyleModel.getLineStyle(['color']);

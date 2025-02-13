@@ -36,16 +36,17 @@ import {
     DecalObject,
     SeriesLabelOption,
     DefaultEmphasisFocus,
-    AriaOptionMixin
+    AriaOptionMixin,
+    BlurScope
 } from '../../util/types';
 import GlobalModel from '../../model/Global';
 import { LayoutRect } from '../../util/layout';
-import List from '../../data/List';
+import SeriesData from '../../data/SeriesData';
 import { normalizeToArray } from '../../util/model';
 import { createTooltipMarkup } from '../../component/tooltip/tooltipMarkup';
 import enableAriaDecalForTree from '../helper/enableAriaDecalForTree';
 
-// Only support numberic value.
+// Only support numeric value.
 type TreemapSeriesDataValue = number | number[];
 
 interface BreadcrumbItemStyleOption extends ItemStyleOption {
@@ -54,11 +55,10 @@ interface BreadcrumbItemStyleOption extends ItemStyleOption {
 }
 
 interface TreemapSeriesLabelOption extends SeriesLabelOption {
-    ellipsis?: boolean
     formatter?: string | ((params: CallbackDataParams) => string)
 }
 
-interface TreemapSeriesItemStyleOption extends ItemStyleOption {
+interface TreemapSeriesItemStyleOption<TCbParams = never> extends ItemStyleOption<TCbParams> {
     borderRadius?: number | number[]
 
     colorAlpha?: number
@@ -76,7 +76,12 @@ interface TreePathInfo {
 }
 
 interface TreemapSeriesCallbackDataParams extends CallbackDataParams {
+    /**
+     * @deprecated
+     */
     treePathInfo?: TreePathInfo[]
+
+    treeAncestors?: TreePathInfo[]
 }
 
 interface ExtraStateOption {
@@ -85,8 +90,8 @@ interface ExtraStateOption {
     }
 }
 
-export interface TreemapStateOption {
-    itemStyle?: TreemapSeriesItemStyleOption
+export interface TreemapStateOption<TCbParams = never> {
+    itemStyle?: TreemapSeriesItemStyleOption<TCbParams>
     label?: TreemapSeriesLabelOption
     upperLabel?: TreemapSeriesLabelOption
 }
@@ -97,6 +102,9 @@ export interface TreemapSeriesVisualOption {
      */
     visualDimension?: number | string
 
+    /**
+     * @deprecated Use colorBy instead
+     */
     colorMappingBy?: 'value' | 'index' | 'id'
 
     visualMin?: number
@@ -105,7 +113,7 @@ export interface TreemapSeriesVisualOption {
     colorAlpha?: number[] | 'none'
     colorSaturation?: number[] | 'none'
     // A color list for a level. Each node in the level will obtain a color from the color list.
-    // Only suuport ColorString for interpolation
+    // Only support ColorString for interpolation.
     // color?: ColorString[]
 
     /**
@@ -136,11 +144,14 @@ export interface TreemapSeriesNodeItemOption extends TreemapSeriesVisualOption,
 
     color?: ColorString[] | 'none'
 
-    decal?: DecalObject[] | 'none'
+    decal?: DecalObject[] | 'none',
+
+    cursor?: string
 }
 
 export interface TreemapSeriesOption
-    extends SeriesOption<TreemapStateOption, ExtraStateOption>, TreemapStateOption,
+    extends SeriesOption<TreemapStateOption<TreemapSeriesCallbackDataParams>, ExtraStateOption>,
+    TreemapStateOption<TreemapSeriesCallbackDataParams>,
     BoxLayoutOptionMixin,
     RoamOptionMixin,
     TreemapSeriesVisualOption {
@@ -182,18 +193,21 @@ export interface TreemapSeriesOption
      * Leaf node click behaviour: 'zoomToNode', 'link', false.
      * If leafDepth is set and clicking a node which has children but
      * be on left depth, the behaviour would be changing root. Otherwise
-     * use behavious defined above.
+     * use behaviour defined above.
      */
-    nodeClick?: 'zoomToNode' | 'link'
+    nodeClick?: 'zoomToNode' | 'link' | false
 
     breadcrumb?: BoxLayoutOptionMixin & {
         show?: boolean
         height?: number
 
-        emptyItemWidth: number  // With of empty width
+        emptyItemWidth?: number  // With of empty width
         itemStyle?: BreadcrumbItemStyleOption
 
         emphasis?: {
+            disabled?: boolean
+            focus?: DefaultEmphasisFocus
+            blurScope?: BlurScope
             itemStyle?: BreadcrumbItemStyleOption
         }
     }
@@ -220,6 +234,12 @@ class TreemapSeriesModel extends SeriesModel<TreemapSeriesOption> {
     private _idIndexMap: zrUtil.HashMap<number>;
     private _idIndexMapCount: number;
 
+    zoom: number;
+    zoomLimit: {
+        max?: number;
+        min?: number;
+    };
+
     static defaultOption: TreemapSeriesOption = {
         // Disable progressive rendering
         progressive: 0,
@@ -239,6 +259,8 @@ class TreemapSeriesModel extends SeriesModel<TreemapSeriesOption> {
 
         zoomToNodeRatio: 0.32 * 0.32,
 
+        scaleLimit: null,
+
         roam: true,
         nodeClick: 'zoomToNode',
         animation: true,
@@ -253,9 +275,14 @@ class TreemapSeriesModel extends SeriesModel<TreemapSeriesOption> {
             // bottom
             emptyItemWidth: 25,             // Width of empty node.
             itemStyle: {
-                color: 'rgba(0,0,0,0.7)', //'#5793f3',
+                color: 'rgba(0,0,0,0.7)', // '#5793f3',
                 textStyle: {
                     color: '#fff'
+                }
+            },
+            emphasis: {
+                itemStyle: {
+                    color: 'rgba(0,0,0,0.9)' // '#5793f3',
                 }
             }
         },
@@ -264,7 +291,7 @@ class TreemapSeriesModel extends SeriesModel<TreemapSeriesOption> {
             // Do not use textDistance, for ellipsis rect just the same as treemap node rect.
             distance: 0,
             padding: 5,
-            position: 'inside', // Can be [5, '5%'] or position stirng like 'insideTopLeft', ...
+            position: 'inside', // Can be [5, '5%'] or position string like 'insideTopLeft', ...
             // formatter: null,
             color: '#fff',
             overflow: 'truncate'
@@ -296,7 +323,7 @@ class TreemapSeriesModel extends SeriesModel<TreemapSeriesOption> {
             upperLabel: {
                 show: true,
                 position: [0, '50%'],
-                ellipsis: true,
+                overflow: 'truncate',
                 verticalAlign: 'middle'
             }
         },
@@ -328,12 +355,6 @@ class TreemapSeriesModel extends SeriesModel<TreemapSeriesOption> {
         levels: []                  // Each item: {
                                     //     visibleMin, itemStyle, visualDimension, label
                                     // }
-        // data: {
-        //      value: [],
-        //      children: [],
-        //      link: 'http://xxx.xxx.xxx',
-        //      target: 'blank' or 'self'
-        // }
     };
 
     /**
@@ -367,10 +388,10 @@ class TreemapSeriesModel extends SeriesModel<TreemapSeriesOption> {
         // to choose mappings approach among old shapes and new shapes.
         const tree = Tree.createTree(root, this, beforeLink);
 
-        function beforeLink(nodeData: List) {
+        function beforeLink(nodeData: SeriesData) {
             nodeData.wrapMethod('getItemModel', function (model, idx) {
                 const node = tree.getNodeByDataIndex(idx);
-                const levelModel = levelModels[node.depth];
+                const levelModel = node ? levelModels[node.depth] : null;
                 // If no levelModel, we also need `designatedVisualModel`.
                 model.parentModel = levelModel || designatedVisualModel;
                 return model;
@@ -412,7 +433,9 @@ class TreemapSeriesModel extends SeriesModel<TreemapSeriesOption> {
         const params = super.getDataParams.apply(this, arguments as any) as TreemapSeriesCallbackDataParams;
 
         const node = this.getData().tree.getNodeByDataIndex(dataIndex);
-        params.treePathInfo = wrapTreePathInfo(node, this);
+        params.treeAncestors = wrapTreePathInfo(node, this);
+        // compatitable the previous code.
+        params.treePathInfo = params.treeAncestors;
 
         return params;
     }

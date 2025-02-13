@@ -21,7 +21,7 @@ under the License.
 <html>
     <head>
         <meta charset="utf-8">
-        <script src="lib/esl.js"></script>
+        <script src="lib/simpleRequire.js"></script>
         <script src="lib/config.js"></script>
     </head>
     <body>
@@ -36,17 +36,19 @@ under the License.
 
             require([
                 'echarts'
-                // 'echarts/chart/radar',
-                // 'echarts/component/legend',
-                // 'echarts/component/tooltip'
             ], function (echarts) {
 
                 var chart = echarts.init(document.getElementById('main'));
 
                 chart.setOption({
-                    title: {
+                    title: [{
                         text: '多雷达图'
-                    },
+                    }, {
+                        text: 'Tooltip series names should not be "-"',
+                        left: '25%',
+                        top: 320,
+                        textAlign: 'center'
+                    }],
                     tooltip: {
                         trigger: 'axis'
                     },
@@ -57,13 +59,17 @@ under the License.
                     radar: [
                         {
                             indicator: [
-                                {text: '品牌', max: 100},
-                                {text: '内容', max: 100},
-                                {text: '可用性', max: 100},
+                                {name: '品牌', max: 100},
+                                {name: '内容', max: 100},
+                                {name: '可用性', max: 100},
+                                // text is deprecated
                                 {text: '功能', max: 100}
                             ],
                             center: ['25%',200],
-                            radius: 80
+                            radius: 80,
+                            axisName: {
+                                show: false
+                            }
                         },
                         {
                             indicator: [

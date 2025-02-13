@@ -30,7 +30,7 @@ import {
 import {AxisPointerOption} from '../axisPointer/AxisPointerModel';
 
 
-type TopLevelFormatterParams = CallbackDataParams | CallbackDataParams[];
+export type TopLevelFormatterParams = CallbackDataParams | CallbackDataParams[];
 
 export interface TooltipOption extends CommonTooltipOption<TopLevelFormatterParams>, ComponentOption {
     mainType?: 'tooltip'
@@ -61,13 +61,19 @@ export interface TooltipOption extends CommonTooltipOption<TopLevelFormatterPara
     renderMode?: 'auto' | TooltipRenderMode   // TODO richText renamed canvas?
 
     /**
-     * If append popup dom to document.body
-     * Only available when renderMode is html
+     * @deprecated
+     * use appendTo: 'body' instead
      */
     appendToBody?: boolean
 
     /**
-     * specified class name of tooltip dom
+     * If append the tooltip element to another DOM element.
+     * Only available when renderMode is html
+     */
+    appendTo?: ((chartContainer: HTMLElement) => HTMLElement | undefined | null) | string | HTMLElement
+
+    /**
+     * Specify the class name of tooltip element
      * Only available when renderMode is html
      */
     className?: string
@@ -82,7 +88,7 @@ class TooltipModel extends ComponentModel<TooltipOption> {
     static dependencies = ['axisPointer'];
 
     static defaultOption: TooltipOption = {
-        zlevel: 0,
+        // zlevel: 0,
 
         z: 60,
 

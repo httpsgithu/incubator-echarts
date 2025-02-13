@@ -61,7 +61,7 @@ import Scheduler from '../core/Scheduler';
 import { concatInternalOptions } from './internalComponentCreator';
 import { LocaleOption } from '../core/locale';
 import {PaletteMixin} from './mixin/palette';
-import { error } from '../util/log';
+import { error, warn } from '../util/log';
 
 export interface GlobalModelSetOptionOpts {
     replaceMerge: ComponentMainType | ComponentMainType[];
@@ -137,6 +137,20 @@ const BUILTIN_CHARTS_MAP = {
 
 const componetsMissingLogPrinted: Record<string, boolean> = {};
 
+function checkMissingComponents(option: ECUnitOption) {
+    each(option, function (componentOption, mainType: ComponentMainType) {
+        if (!ComponentModel.hasClass(mainType)) {
+            const componentImportName = BUITIN_COMPONENTS_MAP[mainType as keyof typeof BUITIN_COMPONENTS_MAP];
+            if (componentImportName && !componetsMissingLogPrinted[componentImportName]) {
+                error(`Component ${mainType} is used but not imported.
+import { ${componentImportName} } from 'echarts/components';
+echarts.use([${componentImportName}]);`);
+                componetsMissingLogPrinted[componentImportName] = true;
+            }
+        }
+    });
+}
+
 class GlobalModel extends Model<ECUnitOption> {
     // @readonly
     option: ECUnitOption;
@@ -150,7 +164,7 @@ class GlobalModel extends Model<ECUnitOption> {
     private _componentsMap: HashMap<ComponentModel[], ComponentMainType>;
 
     /**
-     * `_componentsMap` might have "hole" becuase of remove.
+     * `_componentsMap` might have "hole" because of remove.
      * So save components count for a certain mainType here.
      */
     private _componentsCount: HashMap<number>;
@@ -178,6 +192,9 @@ class GlobalModel extends Model<ECUnitOption> {
     // Injectable properties:
     scheduler: Scheduler;
 
+    // If in ssr mode.
+    // TODO put in a better place?
+    ssr: boolean;
 
     init(
         option: ECBasicOption,
@@ -238,6 +255,9 @@ class GlobalModel extends Model<ECUnitOption> {
 
         if (!type || type === 'recreate') {
             const baseOption = optionManager.mountOption(type === 'recreate');
+            if (__DEV__) {
+                checkMissingComponents(baseOption);
+            }
 
             if (!this.option || type === 'recreate') {
                 initBase(this, baseOption);
@@ -255,7 +275,7 @@ class GlobalModel extends Model<ECUnitOption> {
 
         // By design, if `setOption(option2)` at the second time, and `option2` is a `ECUnitOption`,
         // it should better not have the same props with `MediaUnit['option']`.
-        // Becuase either `option2` or `MediaUnit['option']` will be always merged to "current option"
+        // Because either `option2` or `MediaUnit['option']` will be always merged to "current option"
         // rather than original "baseOption". If they both override a prop, the result might be
         // unexpected when media state changed after `setOption` called.
         // If we really need to modify a props in each `MediaUnit['option']`, use the full version
@@ -308,16 +328,6 @@ class GlobalModel extends Model<ECUnitOption> {
             }
 
             if (!ComponentModel.hasClass(mainType)) {
-                if (__DEV__) {
-                    const componentImportName = BUITIN_COMPONENTS_MAP[mainType as keyof typeof BUITIN_COMPONENTS_MAP];
-                    if (componentImportName && !componetsMissingLogPrinted[componentImportName]) {
-                        error(`Component ${mainType} is used but not imported.
-import { ${componentImportName} } from 'echarts/components';
-echarts.use([${componentImportName}]);`);
-                        componetsMissingLogPrinted[componentImportName] = true;
-                    }
-                }
-
                 // globalSettingTask.dirty();
                 option[mainType] = option[mainType] == null
                     ? clone(componentOption)
@@ -379,6 +389,9 @@ echarts.use([${componentImportName}]);`);
             const cmptsByMainType = [] as ComponentModel[];
             let cmptsCountByMainType = 0;
 
+            let tooltipExists: boolean;
+            let tooltipWarningLogged: boolean;
+
             each(mappingResult, function (resultItem, index) {
                 let componentModel = resultItem.existing;
                 const newCmptOption = resultItem.newOption;
@@ -414,11 +427,25 @@ import { ${seriesImportName} } from 'echarts/charts';
 echarts.use([${seriesImportName}]);`);
                                 }
                                 else {
-                                    error(`Unkown series ${subType}`);
+                                    error(`Unknown series ${subType}`);
                                 }
                             }
                         }
                         return;
+                    }
+
+                    // TODO Before multiple tooltips get supported, we do this check to avoid unexpected exception.
+                    if (mainType === 'tooltip') {
+                        if (tooltipExists) {
+                            if (__DEV__) {
+                                if (!tooltipWarningLogged) {
+                                    warn('Currently only one tooltip component is allowed.');
+                                    tooltipWarningLogged = true;
+                                }
+                            }
+                            return;
+                        }
+                        tooltipExists = true;
                     }
 
                     if (componentModel && componentModel.constructor === ComponentModelClass) {
@@ -521,11 +548,6 @@ echarts.use([${seriesImportName}]);`);
 
     getLocaleModel(): Model<LocaleOption> {
         return this._locale;
-    }
-
-    getLocale(localePosition: Parameters<Model<LocaleOption>['get']>[0]): any {
-        const locale = this.getLocaleModel();
-        return locale.get(localePosition as any);
     }
 
     setUpdatePayload(payload: Payload) {
@@ -660,7 +682,7 @@ echarts.use([${seriesImportName}]);`);
      * });
      * eachComponent(function (componentType, model, index) {
      *     // componentType does not include subType
-     *     // (componentType is 'xxx' but not 'xxx.aa')
+     *     // (componentType is 'a' but not 'a.b')
      * });
      * eachComponent(
      *     {mainType: 'dataZoom', query: {dataZoomId: 'abc'}},
@@ -674,17 +696,17 @@ echarts.use([${seriesImportName}]);`);
     eachComponent<T>(
         cb: EachComponentAllCallback,
         context?: T
-    ): void
+    ): void;
     eachComponent<T>(
         mainType: string,
         cb: EachComponentInMainTypeCallback,
         context?: T
-    ): void
+    ): void;
     eachComponent<T>(
         mainType: QueryConditionKindA,
         cb: EachComponentInMainTypeCallback,
         context?: T
-    ): void
+    ): void;
     eachComponent<T>(
         mainType: string | QueryConditionKindA | EachComponentAllCallback,
         cb?: EachComponentInMainTypeCallback | T,
@@ -751,7 +773,7 @@ echarts.use([${seriesImportName}]);`);
      */
     getSeries(): SeriesModel[] {
         return filter(
-            this._componentsMap.get('series').slice() as SeriesModel[],
+            this._componentsMap.get('series') as SeriesModel[],
             oneSeries => !!oneSeries
         );
     }
@@ -765,7 +787,7 @@ echarts.use([${seriesImportName}]);`);
 
     /**
      * After filtering, series may be different
-     * frome raw series.
+     * from raw series.
      */
     eachSeries<T>(
         cb: (this: T, series: SeriesModel, rawSeriesIndex: number) => void,
@@ -795,7 +817,7 @@ echarts.use([${seriesImportName}]);`);
 
     /**
      * After filtering, series may be different.
-     * frome raw series.
+     * from raw series.
      */
     eachSeriesByType<T>(
         subType: ComponentSubType,
@@ -899,8 +921,8 @@ echarts.use([${seriesImportName}]);`);
         };
 
         initBase = function (ecModel: GlobalModel, baseOption: ECUnitOption & AriaOptionMixin): void {
-            // Using OPTION_INNER_KEY to mark that this option can not be used outside,
-            // i.e. `chart.setOption(chart.getModel().option);` is forbiden.
+            // Using OPTION_INNER_KEY to mark that this option cannot be used outside,
+            // i.e. `chart.setOption(chart.getModel().option);` is forbidden.
             ecModel.option = {} as ECUnitOption;
             ecModel.option[OPTION_INNER_KEY] = OPTION_INNER_VALUE;
 
@@ -990,6 +1012,7 @@ function mergeTheme(option: ECUnitOption, theme: ThemeOption): void {
         if (name === 'colorLayer' && notMergeColorLayer) {
             return;
         }
+
         // If it is component model mainType, the model handles that merge later.
         // otherwise, merge them here.
         if (!ComponentModel.hasClass(name)) {

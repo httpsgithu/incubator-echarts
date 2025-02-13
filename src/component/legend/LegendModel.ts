@@ -46,13 +46,13 @@ const getDefaultSelectorOptions = function (ecModel: GlobalModel, type: string):
     if (type === 'all') {
         return {
             type: 'all',
-            title: ecModel.getLocale(['legend', 'selector', 'all'])
+            title: ecModel.getLocaleModel().get(['legend', 'selector', 'all'])
         };
     }
     else if (type === 'inverse') {
         return {
             type: 'inverse',
-            title: ecModel.getLocale(['legend', 'selector', 'inverse'])
+            title: ecModel.getLocaleModel().get(['legend', 'selector', 'inverse'])
         };
     }
 };
@@ -114,9 +114,12 @@ export interface LegendStyleOption {
 
     textStyle?: LabelOption
 
-    symbolKeepAspect?: boolean
+    symbolRotate?: number | 'inherit'
 
-    symbolSize?: number | 'auto' | 'inherit'
+    /**
+     * @deprecated
+     */
+    symbolKeepAspect?: boolean
 }
 
 interface DataItem extends LegendStyleOption {
@@ -135,20 +138,21 @@ export interface LegendTooltipFormatterParams {
     $vars: ['name']
 }
 
-export interface LegendSymbolParams {
-    itemWidth: number,
-    itemHeight: number,
+export interface LegendIconParams {
+    itemWidth: number
+    itemHeight: number
     /**
      * symbolType is from legend.icon, legend.data.icon, or series visual
      */
-    symbolType: string,
-    symbolKeepAspect: boolean,
-    itemStyle: PathStyleProps,
+    icon: string
+    iconRotate: number | 'inherit'
+    symbolKeepAspect: boolean
+    itemStyle: PathStyleProps
     lineStyle: LineStyleProps
 }
 
 export interface LegendSymbolStyleOption {
-    itemStyle?: ItemStyleProps,
+    itemStyle?: ItemStyleProps
     lineStyle?: LineStyleProps
 }
 
@@ -243,7 +247,7 @@ class LegendModel<Ops extends LegendOption = LegendOption> extends ComponentMode
     readonly layoutMode = {
         type: 'box',
         // legend.width/height are maxWidth/maxHeight actually,
-        // whereas realy width/height is calculated by its content.
+        // whereas real width/height is calculated by its content.
         // (Setting {left: 10, right: 10} does not make sense).
         // So consider the case:
         // `setOption({legend: {left: 10});`
@@ -346,17 +350,23 @@ class LegendModel<Ops extends LegendOption = LegendOption> extends ComponentMode
          */
         this._availableNames = availableNames;
 
-        // If legend.data not specified in option, use availableNames as data,
-        // which is convinient for user preparing option.
+        // If legend.data is not specified in option, use availableNames as data,
+        // which is convenient for user preparing option.
         const rawData = this.get('data') || potentialData;
 
+        const legendNameMap = zrUtil.createHashMap();
         const legendData = zrUtil.map(rawData, function (dataItem) {
             // Can be string or number
-            if (typeof dataItem === 'string' || typeof dataItem === 'number') {
+            if (zrUtil.isString(dataItem) || zrUtil.isNumber(dataItem)) {
                 dataItem = {
-                    name: dataItem
+                    name: dataItem as string
                 };
             }
+            if (legendNameMap.get(dataItem.name)) {
+                // remove legend name duplicate
+                return null;
+            }
+            legendNameMap.set(dataItem.name, true);
             return new Model(dataItem, this, this.ecModel);
         }, this);
 
@@ -364,7 +374,7 @@ class LegendModel<Ops extends LegendOption = LegendOption> extends ComponentMode
          * @type {Array.<module:echarts/model/Model>}
          * @private
          */
-        this._data = legendData;
+        this._data = zrUtil.filter(legendData, item => !!item);
     }
 
     getData() {
@@ -434,7 +444,7 @@ class LegendModel<Ops extends LegendOption = LegendOption> extends ComponentMode
     }
 
     static defaultOption: LegendOption = {
-        zlevel: 0,
+        // zlevel: 0,
         z: 4,
         show: true,
 
@@ -455,7 +465,8 @@ class LegendModel<Ops extends LegendOption = LegendOption> extends ComponentMode
         itemGap: 10,
         itemWidth: 25,
         itemHeight: 14,
-        symbolSize: 'auto',
+        symbolRotate: 'inherit',
+        symbolKeepAspect: true,
 
         inactiveColor: '#ccc',
         inactiveBorderColor: '#ccc',
@@ -464,11 +475,6 @@ class LegendModel<Ops extends LegendOption = LegendOption> extends ComponentMode
         itemStyle: {
             color: 'inherit',
             opacity: 'inherit',
-            decal: 'inherit',
-            shadowBlur: 0,
-            shadowColor: null,
-            shadowOffsetX: 0,
-            shadowOffsetY: 0,
             borderColor: 'inherit',
             borderWidth: 'auto',
             borderCap: 'inherit',
@@ -487,11 +493,7 @@ class LegendModel<Ops extends LegendOption = LegendOption> extends ComponentMode
             cap: 'inherit',
             join: 'inherit',
             dashOffset: 'inherit',
-            miterLimit: 'inherit',
-            shadowBlur: 0,
-            shadowColor: null,
-            shadowOffsetX: 0,
-            shadowOffsetY: 0
+            miterLimit: 'inherit'
         },
 
         textStyle: {
@@ -506,7 +508,7 @@ class LegendModel<Ops extends LegendOption = LegendOption> extends ComponentMode
             borderRadius: 10,
             padding: [3, 5, 3, 5],
             fontSize: 12,
-            fontFamily: ' sans-serif',
+            fontFamily: 'sans-serif',
             color: '#666',
             borderWidth: 1,
             borderColor: '#666'

@@ -21,7 +21,7 @@ import { assert, isArray, eqNaN, isFunction } from 'zrender/src/core/util';
 import Scale from '../scale/Scale';
 import { AxisBaseModel } from './AxisBaseModel';
 import { parsePercent } from 'zrender/src/contain/text';
-import { AxisBaseOption } from './axisCommonTypes';
+import { AxisBaseOption, CategoryAxisBaseOption } from './axisCommonTypes';
 import { ScaleDataValue } from '../util/types';
 
 
@@ -80,7 +80,7 @@ export class ScaleRawExtentInfo {
     }
 
     /**
-     * Parameters depending on ouside (like model, user callback)
+     * Parameters depending on outside (like model, user callback)
      * are prepared and fixed here.
      */
     private _prepareParams(
@@ -96,11 +96,15 @@ export class ScaleRawExtentInfo {
         this._dataMax = dataExtent[1];
 
         const isOrdinal = this._isOrdinal = scale.type === 'ordinal';
-        this._needCrossZero = model.getNeedCrossZero && model.getNeedCrossZero();
+        this._needCrossZero = scale.type === 'interval' && model.getNeedCrossZero && model.getNeedCrossZero();
 
-        const modelMinRaw = this._modelMinRaw = model.get('min', true);
+        let axisMinValue = model.get('min', true);
+        if (axisMinValue == null) {
+            axisMinValue = model.get('startValue', true);
+        }
+        const modelMinRaw = this._modelMinRaw = axisMinValue;
         if (isFunction(modelMinRaw)) {
-            // This callback alway provide users the full data extent (before data filtered).
+            // This callback always provides users the full data extent (before data is filtered).
             this._modelMinNum = parseAxisModelMinMax(scale, modelMinRaw({
                 min: dataExtent[0],
                 max: dataExtent[1]
@@ -112,7 +116,7 @@ export class ScaleRawExtentInfo {
 
         const modelMaxRaw = this._modelMaxRaw = model.get('max', true);
         if (isFunction(modelMaxRaw)) {
-            // This callback alway provide users the full data extent (before data filtered).
+            // This callback always provides users the full data extent (before data is filtered).
             this._modelMaxNum = parseAxisModelMinMax(scale, modelMaxRaw({
                 min: dataExtent[0],
                 max: dataExtent[1]
@@ -129,7 +133,7 @@ export class ScaleRawExtentInfo {
             this._axisDataLen = model.getCategories().length;
         }
         else {
-            const boundaryGap = model.get('boundaryGap');
+            const boundaryGap = (model as AxisBaseModel<CategoryAxisBaseOption>).get('boundaryGap');
             const boundaryGapArr = isArray(boundaryGap)
                 ? boundaryGap : [boundaryGap || 0, boundaryGap || 0];
 
@@ -200,11 +204,6 @@ export class ScaleRawExtentInfo {
 
         (min == null || !isFinite(min)) && (min = NaN);
         (max == null || !isFinite(max)) && (max = NaN);
-
-        if (min > max) {
-            min = NaN;
-            max = NaN;
-        }
 
         const isBlank = eqNaN(min)
             || eqNaN(max)
@@ -290,7 +289,7 @@ const DATA_MIN_MAX_ATTR = { min: '_dataMin', max: '_dataMax' } as const;
  * (3) `coordSys.update` use it to finally decide the scale extent.
  * But the callback of `min`/`max` should not be called multiple times.
  * The code below should not be implemented repeatedly either.
- * So we cache the result in the scale instance, which will be recreated at the begining
+ * So we cache the result in the scale instance, which will be recreated at the beginning
  * of the workflow (because `scale` instance will be recreated each round of the workflow).
  */
 export function ensureScaleRawExtentInfo(

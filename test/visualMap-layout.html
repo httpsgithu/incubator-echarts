@@ -21,7 +21,7 @@ under the License.
 <html>
     <head>
         <meta charset="utf-8">
-        <script src="lib/esl.js"></script>
+        <script src="lib/simpleRequire.js"></script>
         <script src="lib/config.js"></script>
         <link rel="stylesheet" href="lib/reset.css">
         <style>
@@ -64,13 +64,7 @@ under the License.
         <script>
 
 
-            require([
-                'echarts'
-                // 'zrender/core/util',
-                // 'echarts/chart/scatter',
-                // 'echarts/component/grid',
-                // 'echarts/component/visualMap'
-            ], function (echarts) {
+            require(['echarts'], function (echarts) {
                 var zrUtil = echarts.util;
                 makeChart({
                     show: true,
@@ -445,6 +439,96 @@ under the License.
                 });
 
 
+                // -------------------------------------------
+
+
+                makeChart({
+                    show: true,
+                    splitNumber: 7,
+                    text: ['高2', '低'],
+                    backgroundColor: '#eee',
+                    inverse: true,
+                    padding: [10, 30, 5, 40],
+                    calculable: true,
+                    inRange: {
+                        symbolSize: [10, 20]
+                    }
+                });
+                makeChart({
+                    left: 200,
+                    show: true,
+                    inverse: true,
+                    text: ['高', '低'],
+                    calculable: true,
+                    backgroundColor: '#eee',
+                    inRange: {
+                        symbolSize: [10, 20]
+                    }
+                });
+                makeChart({
+                    right: 0,
+                    splitNumber: 5,
+                    text: ['高', '低'],
+                    calculable: true,
+                    dimension: 3,
+                    backgroundColor: '#eee',
+                    inRange: {
+                        symbolSize: [10, 20]
+                    }
+                });
+                makeChart({
+                    left: 0,
+                    top: 0,
+                    orient: 'horizontal',
+                    text: ['高', '低'],
+                    splitNumber: 6,
+                    calculable: true,
+                    inverse: true,
+                    dimension: 3,
+                    backgroundColor: '#eee',
+                    inRange: {
+                        symbolSize: [10, 20]
+                    }
+                });
+                makeChart({
+                    right: 0,
+                    top: 20,
+                    orient: 'horizontal',
+                    text: ['高', '低'],
+                    splitNumber: 5,
+                    align: 'bottom',
+                    calculable: true,
+                    dimension: 3,
+                    backgroundColor: '#eee',
+                    inRange: {
+                        symbolSize: [10, 20]
+                    }
+                });
+                makeChart({
+                    top: 40,
+                    splitNumber: 6,
+                    orient: 'horizontal',
+                    text: ['高', '低'],
+                    calculable: true,
+                    dimension: 3,
+                    backgroundColor: '#eee',
+                    inRange: {
+                        symbolSize: [10, 20]
+                    }
+                });
+                makeChart({
+                    left: 'center',
+                    bottom: 0,
+                    orient: 'horizontal',
+                    splitNumber: 6,
+                    text: ['高', '低'],
+                    calculable: true,
+                    dimension: 3,
+                    backgroundColor: '#eee',
+                    inRange: {
+                        symbolSize: [10, 20]
+                    }
+                });
 
 
 

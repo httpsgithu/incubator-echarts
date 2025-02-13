@@ -17,11 +17,11 @@
 * under the License.
 */
 
-import createListSimply from '../helper/createListSimply';
+import createSeriesDataSimply from '../helper/createSeriesDataSimply';
 import * as zrUtil from 'zrender/src/core/util';
 import * as modelUtil from '../../util/model';
-import {getPercentWithPrecision} from '../../util/number';
-import {makeSeriesEncodeForNameBased} from '../../data/helper/sourceHelper';
+import { getPercentSeats } from '../../util/number';
+import { makeSeriesEncodeForNameBased } from '../../data/helper/sourceHelper';
 import LegendVisualProvider from '../../visual/LegendVisualProvider';
 import SeriesModel from '../../model/Series';
 import {
@@ -38,9 +38,9 @@ import {
     SeriesLabelOption,
     DefaultEmphasisFocus
 } from '../../util/types';
-import List from '../../data/List';
+import type SeriesData from '../../data/SeriesData';
 
-interface PieItemStyleOption extends ItemStyleOption {
+interface PieItemStyleOption<TCbParams = never> extends ItemStyleOption<TCbParams> {
     // can be 10
     // which means that both innerCornerRadius and outerCornerRadius are 10
     // can also be an array [20, 10]
@@ -52,14 +52,18 @@ interface PieItemStyleOption extends ItemStyleOption {
     borderRadius?: (number | string)[] | number | string
 }
 
-export interface PieStateOption {
+export interface PieCallbackDataParams extends CallbackDataParams {
+    percent: number
+}
+
+export interface PieStateOption<TCbParams = never> {
     // TODO: TYPE Color Callback
-    itemStyle?: PieItemStyleOption
+    itemStyle?: PieItemStyleOption<TCbParams>
     label?: PieLabelOption
     labelLine?: PieLabelLineOption
 }
 interface PieLabelOption extends Omit<SeriesLabelOption, 'rotate' | 'position'> {
-    rotate?: number
+    rotate?: number | boolean | 'radial' | 'tangential'
     alignTo?: 'none' | 'labelLine' | 'edge'
     edgeDistance?: string | number
     /**
@@ -91,12 +95,12 @@ interface ExtraStateOption {
 export interface PieDataItemOption extends
     OptionDataItemObject<OptionDataValueNumeric>,
     PieStateOption, StatesOptionMixin<PieStateOption, ExtraStateOption> {
-
     cursor?: string
 }
 export interface PieSeriesOption extends
-    Omit<SeriesOption<PieStateOption, ExtraStateOption>, 'labelLine'>, PieStateOption,
-    CircleLayoutOptionMixin,
+    Omit<SeriesOption<PieStateOption<PieCallbackDataParams>, ExtraStateOption>, 'labelLine'>,
+    PieStateOption<PieCallbackDataParams>,
+    Omit<CircleLayoutOptionMixin, 'center'>,
     BoxLayoutOptionMixin,
     SeriesEncodeOptionMixin {
 
@@ -104,8 +108,13 @@ export interface PieSeriesOption extends
 
     roseType?: 'radius' | 'area'
 
+    center?: string | number | (string | number)[]
+
     clockwise?: boolean
     startAngle?: number
+    endAngle?: number | 'auto'
+    padAngle?: number;
+
     minAngle?: number
     minShowLabelAngle?: number
 
@@ -119,14 +128,19 @@ export interface PieSeriesOption extends
     animationType?: 'expansion' | 'scale'
     animationTypeUpdate?: 'transition' | 'expansion'
 
-    data?: OptionDataValueNumeric[] | OptionDataValueNumeric[][] | PieDataItemOption[]
+    showEmptyCircle?: boolean;
+    emptyCircleStyle?: PieItemStyleOption;
+
+    data?: (OptionDataValueNumeric | OptionDataValueNumeric[] | PieDataItemOption)[]
 }
+
+const innerData = modelUtil.makeInner<{
+    seats?: number[]
+}, SeriesData>();
 
 class PieSeriesModel extends SeriesModel<PieSeriesOption> {
 
     static type = 'series.pie' as const;
-
-    useColorPaletteOnData = true;
 
     /**
      * @overwrite
@@ -153,8 +167,8 @@ class PieSeriesModel extends SeriesModel<PieSeriesOption> {
     /**
      * @overwrite
      */
-    getInitialData(this: PieSeriesModel): List {
-        return createListSimply(this, {
+    getInitialData(this: PieSeriesModel): SeriesData {
+        return createSeriesDataSimply(this, {
             coordDimensions: ['value'],
             encodeDefaulter: zrUtil.curry(makeSeriesEncodeForNameBased, this)
         });
@@ -163,22 +177,21 @@ class PieSeriesModel extends SeriesModel<PieSeriesOption> {
     /**
      * @overwrite
      */
-    getDataParams(dataIndex: number): CallbackDataParams {
+    getDataParams(dataIndex: number): PieCallbackDataParams {
         const data = this.getData();
-        const params = super.getDataParams(dataIndex);
-        // FIXME toFixed?
-
-        const valueList: number[] = [];
-        data.each(data.mapDimension('value'), function (value: number) {
-            valueList.push(value);
-        });
-
-        params.percent = getPercentWithPrecision(
-            valueList,
-            dataIndex,
-            data.hostModel.get('percentPrecision')
-        );
-
+        // update seats when data is changed
+        const dataInner = innerData(data);
+        let seats = dataInner.seats;
+        if (!seats) {
+            const valueList: number[] = [];
+            data.each(data.mapDimension('value'), function (value: number) {
+                valueList.push(value);
+            });
+            seats = dataInner.seats = getPercentSeats(valueList, data.hostModel.get('percentPrecision'));
+        }
+        const params = super.getDataParams(dataIndex) as PieCallbackDataParams;
+        // seats may be empty when sum is 0
+        params.percent = seats[dataIndex] || 0;
         params.$vars.push('percent');
         return params;
     }
@@ -197,16 +210,18 @@ class PieSeriesModel extends SeriesModel<PieSeriesOption> {
     }
 
     static defaultOption: Omit<PieSeriesOption, 'type'> = {
-        zlevel: 0,
+        // zlevel: 0,
         z: 2,
         legendHoverLink: true,
-
+        colorBy: 'data',
         // 默认全局居中
         center: ['50%', '50%'],
         radius: [0, '75%'],
         // 默认顺时针
         clockwise: true,
         startAngle: 90,
+        endAngle: 'auto',
+        padAngle: 0,
         // 最小角度改为0
         minAngle: 0,
 
@@ -253,8 +268,8 @@ class PieSeriesModel extends SeriesModel<PieSeriesOption> {
             bleedMargin: 10,
             // Distance between text and label line.
             distanceToLabelLine: 5
-            // formatter: 标签文本格式器，同Tooltip.formatter，不支持异步回调
-            // 默认使用全局文本样式，详见TEXTSTYLE
+            // formatter: 标签文本格式器，同 tooltip.formatter，不支持异步回调
+            // 默认使用全局文本样式，详见 textStyle
             // distance: 当position为inner时有效，为label位置到圆心的距离与圆半径(环状图为内外半径和)的比例系数
         },
         // Enabled when label.normal.position is 'outer'
@@ -274,7 +289,14 @@ class PieSeriesModel extends SeriesModel<PieSeriesOption> {
             }
         },
         itemStyle: {
-            borderWidth: 1
+            borderWidth: 1,
+            borderJoin: 'round'
+        },
+
+        showEmptyCircle: true,
+        emptyCircleStyle: {
+            color: 'lightgray',
+            opacity: 1
         },
 
         labelLayout: {

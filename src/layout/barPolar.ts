@@ -27,6 +27,7 @@ import RadiusAxis from '../coord/polar/RadiusAxis';
 import GlobalModel from '../model/Global';
 import ExtensionAPI from '../core/ExtensionAPI';
 import { Dictionary } from '../util/types';
+import { PolarAxisModel } from '../coord/polar/AxisModel';
 
 type PolarAxis = AngleAxis | RadiusAxis;
 
@@ -100,11 +101,14 @@ function barLayoutPolar(seriesType: string, ecModel: GlobalModel, api: Extension
 
         const valueDim = data.mapDimension(valueAxis.dim);
         const baseDim = data.mapDimension(baseAxis.dim);
-        const stacked = isDimensionStacked(data, valueDim /*, baseDim*/);
+        const stacked = isDimensionStacked(data, valueDim /* , baseDim */);
         const clampLayout = baseAxis.dim !== 'radius'
             || !seriesModel.get('roundCap', true);
 
-        const valueAxisStart = valueAxis.dataToCoord(0);
+        const valueAxisModel = valueAxis.model as PolarAxisModel;
+        const startValue = valueAxisModel.get('startValue');
+        const valueAxisStart = valueAxis.dataToCoord(startValue || 0);
+
         for (let idx = 0, len = data.count(); idx < len; idx++) {
             const value = data.get(valueDim, idx) as number;
             const baseValue = data.get(baseDim, idx) as number;
@@ -183,7 +187,15 @@ function barLayoutPolar(seriesType: string, ecModel: GlobalModel, api: Extension
                 // Consider that positive angle is anti-clockwise,
                 // while positive radian of sector is clockwise
                 startAngle: -startAngle * Math.PI / 180,
-                endAngle: -endAngle * Math.PI / 180
+                endAngle: -endAngle * Math.PI / 180,
+
+                /**
+                 * Keep the same logic with bar in catesion: use end value to
+                 * control direction. Notice that if clockwise is true (by
+                 * default), the sector will always draw clockwisely, no matter
+                 * whether endAngle is greater or less than startAngle.
+                 */
+                clockwise: startAngle >= endAngle
             });
 
         }

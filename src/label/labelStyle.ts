@@ -17,7 +17,7 @@
 * under the License.
 */
 
-import ZRText, { TextStyleProps } from 'zrender/src/graphic/Text';
+import ZRText, { TextProps, TextStyleProps } from 'zrender/src/graphic/Text';
 import { Dictionary } from 'zrender/src/core/types';
 import Element, { ElementTextConfig } from 'zrender/src/Element';
 import Model from '../model/Model';
@@ -30,17 +30,15 @@ import {
     ColorString,
     ZRStyleProps,
     AnimationOptionMixin,
-    InterpolatableValue,
-    SeriesDataType
+    InterpolatableValue
 } from '../util/types';
 import GlobalModel from '../model/Global';
 import { isFunction, retrieve2, extend, keys, trim } from 'zrender/src/core/util';
 import { SPECIAL_STATES, DISPLAY_STATES } from '../util/states';
 import { deprecateReplaceLog } from '../util/log';
 import { makeInner, interpolateRawValues } from '../util/model';
-import List from '../data/List';
+import SeriesData from '../data/SeriesData';
 import { initProps, updateProps } from '../util/graphic';
-import { getECData } from '../util/innerStore';
 
 type TextCommonParams = {
     /**
@@ -146,7 +144,7 @@ function getLabelText<TLabelDataIndex>(
             labelDimIndex,
             normalModel && normalModel.get('formatter'),
             interpolatedValue != null ? {
-                interpolatedValue: interpolatedValue
+                interpolatedValue
             } : null
         );
     }
@@ -265,7 +263,7 @@ function setLabelStyle<TLabelDataIndex>(
 
         // PENDING: if there is many requirements that emphasis position
         // need to be different from normal position, we might consider
-        // auto slient is those cases.
+        // auto silent is those cases.
         textContent.silent = !!normalModel.getShallow('silent');
         // Keep x and y
         if (textContent.style.x != null) {
@@ -295,7 +293,7 @@ function setLabelStyle<TLabelDataIndex>(
 export { setLabelStyle };
 
 export function getLabelStatesModels<LabelName extends string = 'label'>(
-    itemModel: Model<StatesOptionMixin<any> & Partial<Record<LabelName, any>>>,
+    itemModel: Model<StatesOptionMixin<any, any> & Partial<Record<LabelName, any>>>,
     labelName?: LabelName
 ): Record<DisplayState, LabelModel> {
     labelName = (labelName || 'label') as LabelName;
@@ -462,7 +460,7 @@ const TEXT_PROPS_WITH_GLOBAL = [
     'textShadowColor', 'textShadowBlur', 'textShadowOffsetX', 'textShadowOffsetY'
 ] as const;
 const TEXT_PROPS_SELF = [
-    'align', 'lineHeight', 'width', 'height', 'tag', 'verticalAlign'
+    'align', 'lineHeight', 'width', 'height', 'tag', 'verticalAlign', 'ellipsis'
 ] as const;
 const TEXT_PROPS_BOX = [
     'padding', 'borderWidth', 'borderRadius', 'borderDashOffset',
@@ -674,7 +672,6 @@ export function setLabelValueAnimation(
     const obj = labelInner(label);
     obj.prevValue = obj.value;
     obj.value = value;
-
     const normalLabelModel = labelStatesModels.normal;
 
     obj.valueAnimation = normalLabelModel.get('valueAnimation');
@@ -689,14 +686,16 @@ export function setLabelValueAnimation(
 export function animateLabelValue(
     textEl: ZRText,
     dataIndex: number,
-    data: List,
+    data: SeriesData,
     animatableModel: Model<AnimationOptionMixin>,
     labelFetcher: SetLabelStyleOpt<number>['labelFetcher']
 ) {
     const labelInnerStore = labelInner(textEl);
-    if (!labelInnerStore.valueAnimation) {
+    if (!labelInnerStore.valueAnimation || labelInnerStore.prevValue === labelInnerStore.value) {
+        // Value not changed, no new label animation
         return;
     }
+
     const defaultInterpolatedText = labelInnerStore.defaultInterpolatedText;
     // Consider the case that being animating, do not use the `obj.value`,
     // Otherwise it will jump to the `obj.value` when this new animation started.
@@ -711,6 +710,7 @@ export function animateLabelValue(
             targetValue,
             percent
         );
+
         labelInnerStore.interpolatedValue = percent === 1 ? null : interpolated;
 
         const labelText = getLabelText({
@@ -724,17 +724,12 @@ export function animateLabelValue(
         setLabelText(textEl, labelText);
     }
 
-    (currValue == null
+    (textEl as ZRText & {percent?: number}).percent = 0;
+    (labelInnerStore.prevValue == null
         ? initProps
         : updateProps
-    )(textEl, {}, animatableModel, dataIndex, null, during);
-}
-
-export function enableLayoutLayoutFeatures(
-    el: Element,
-    dataIndex: number,
-    dataType: SeriesDataType
-): void {
-    getECData(el).dataIndex = dataIndex;
-    getECData(el).dataType = dataType;
+    )<TextProps & {percent?: number}>(textEl, {
+        // percent is used to prevent animation from being aborted #15916
+        percent: 1
+    }, animatableModel, dataIndex, null, during);
 }

@@ -26,7 +26,7 @@ import { BoundingRect } from '../util/graphic';
 import { MatrixArray } from 'zrender/src/core/matrix';
 import ComponentModel from '../model/Component';
 import { RectLike } from 'zrender/src/core/BoundingRect';
-import type { PrepareCustomInfo } from '../chart/custom/install';
+import type { PrepareCustomInfo } from '../chart/custom/CustomSeries';
 
 
 export interface CoordinateSystemCreator {
@@ -57,17 +57,17 @@ export interface CoordinateSystemMaster {
 
     update?: (ecModel: GlobalModel, api: ExtensionAPI) => void;
 
-    // This methods is also responsible for determine whether this
-    // coodinate system is applicable to the given `finder`.
-    // Each coordinate system will be tried, util one returns none
+    // This methods is also responsible for determining whether this
+    // coordinate system is applicable to the given `finder`.
+    // Each coordinate system will be tried, until one returns non-
     // null/undefined value.
     convertToPixel?(
         ecModel: GlobalModel, finder: ParsedModelFinder, value: ScaleDataValue | ScaleDataValue[]
     ): number | number[];
 
-    // This methods is also responsible for determine whether this
-    // coodinate system is applicable to the given `finder`.
-    // Each coordinate system will be tried, util one returns none
+    // This methods is also responsible for determining whether this
+    // coordinate system is applicable to the given `finder`.
+    // Each coordinate system will be tried, until one returns non-
     // null/undefined value.
     convertFromPixel?(
         ecModel: GlobalModel, finder: ParsedModelFinder, pixelValue: number | number[]
@@ -126,18 +126,18 @@ export interface CoordinateSystem {
      * Some coord sys (like Parallel) might do not have `pointToData`,
      * or the meaning of this kind of features is not clear yet.
      * @param point point Point in global pixel coordinate system.
-     * @param reserved Defined by the coordinate system itself
-     * @param out
+     * @param clamp Clamp range
      * @return data
      */
     pointToData?(
         point: number[],
-        reserved?: any,
-        out?: number[]
+        clamp?: boolean
     ): number | number[];
 
     // @param point Point in global pixel coordinate system.
     containPoint(point: number[]): boolean;
+
+    getAxes?: () => Axis[];
 
     getAxis?: (dim?: DimensionName) => Axis;
 
@@ -149,7 +149,7 @@ export interface CoordinateSystem {
 
     getRoamTransform?: () => MatrixArray;
 
-    getArea?: () => CoordinateSystemClipArea
+    getArea?: (tolerance?: number) => CoordinateSystemClipArea
 
     // Only `coord/View.js` implements `getBoundingRect`.
     // But if other coord sys implement it, should follow this signature.

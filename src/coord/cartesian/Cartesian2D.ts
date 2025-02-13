@@ -105,7 +105,19 @@ class Cartesian2D extends Cartesian<Axis2D> implements CoordinateSystem {
             && this.getAxis('y').containData(data[1]);
     }
 
-    dataToPoint(data: ScaleDataValue[], reserved?: unknown, out?: number[]): number[] {
+    containZone(data1: ScaleDataValue[], data2: ScaleDataValue[]): boolean {
+        const zoneDiag1 = this.dataToPoint(data1);
+        const zoneDiag2 = this.dataToPoint(data2);
+        const area = this.getArea();
+        const zone = new BoundingRect(
+            zoneDiag1[0],
+            zoneDiag1[1],
+            zoneDiag2[0] - zoneDiag1[0],
+            zoneDiag2[1] - zoneDiag1[1]);
+        return area.intersect(zone);
+    }
+
+    dataToPoint(data: ScaleDataValue[], clamp?: boolean, out?: number[]): number[] {
         out = out || [];
         const xVal = data[0];
         const yVal = data[1];
@@ -121,8 +133,8 @@ class Cartesian2D extends Cartesian<Axis2D> implements CoordinateSystem {
         }
         const xAxis = this.getAxis('x');
         const yAxis = this.getAxis('y');
-        out[0] = xAxis.toGlobalCoord(xAxis.dataToCoord(xVal));
-        out[1] = yAxis.toGlobalCoord(yAxis.dataToCoord(yVal));
+        out[0] = xAxis.toGlobalCoord(xAxis.dataToCoord(xVal, clamp));
+        out[1] = yAxis.toGlobalCoord(yAxis.dataToCoord(yVal, clamp));
         return out;
     }
 
@@ -146,15 +158,15 @@ class Cartesian2D extends Cartesian<Axis2D> implements CoordinateSystem {
         return out;
     }
 
-    pointToData(point: number[], out?: number[]): number[] {
-        out = out || [];
+    pointToData(point: number[], clamp?: boolean): number[] {
+        const out: number[] = [];
         if (this._invTransform) {
             return applyTransform(out, point, this._invTransform);
         }
         const xAxis = this.getAxis('x');
         const yAxis = this.getAxis('y');
-        out[0] = xAxis.coordToData(xAxis.toLocalCoord(point[0]));
-        out[1] = yAxis.coordToData(yAxis.toLocalCoord(point[1]));
+        out[0] = xAxis.coordToData(xAxis.toLocalCoord(point[0]), clamp);
+        out[1] = yAxis.coordToData(yAxis.toLocalCoord(point[1]), clamp);
         return out;
     }
 
@@ -166,13 +178,15 @@ class Cartesian2D extends Cartesian<Axis2D> implements CoordinateSystem {
      * Get rect area of cartesian.
      * Area will have a contain function to determine if a point is in the coordinate system.
      */
-    getArea(): Cartesian2DArea {
+    getArea(tolerance?: number): Cartesian2DArea {
+        tolerance = tolerance || 0;
+
         const xExtent = this.getAxis('x').getGlobalExtent();
         const yExtent = this.getAxis('y').getGlobalExtent();
-        const x = Math.min(xExtent[0], xExtent[1]);
-        const y = Math.min(yExtent[0], yExtent[1]);
-        const width = Math.max(xExtent[0], xExtent[1]) - x;
-        const height = Math.max(yExtent[0], yExtent[1]) - y;
+        const x = Math.min(xExtent[0], xExtent[1]) - tolerance;
+        const y = Math.min(yExtent[0], yExtent[1]) - tolerance;
+        const width = Math.max(xExtent[0], xExtent[1]) - x + tolerance;
+        const height = Math.max(yExtent[0], yExtent[1]) - y + tolerance;
 
         return new BoundingRect(x, y, width, height);
     }

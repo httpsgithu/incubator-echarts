@@ -20,28 +20,32 @@
 import {createHashMap, each} from 'zrender/src/core/util';
 import GlobalModel from '../model/Global';
 import SeriesModel from '../model/Series';
-import { SeriesOption, SeriesStackOptionMixin, DimensionName } from '../util/types';
-import List from '../data/List';
+import { SeriesOption, SeriesStackOptionMixin } from '../util/types';
+import SeriesData, { DataCalculationInfo } from '../data/SeriesData';
+import { addSafe } from '../util/number';
 
-interface StackInfo {
-    stackedDimension: DimensionName
-    isStackedByIndex: boolean
-    stackedByDimension: DimensionName
-    stackResultDimension: DimensionName
-    stackedOverDimension: DimensionName
-    data: List
+type StackInfo = Pick<
+    DataCalculationInfo<SeriesOption & SeriesStackOptionMixin>,
+    'stackedDimension'
+    | 'isStackedByIndex'
+    | 'stackedByDimension'
+    | 'stackResultDimension'
+    | 'stackedOverDimension'
+> & {
+    data: SeriesData
     seriesModel: SeriesModel<SeriesOption & SeriesStackOptionMixin>
-}
+};
+
 // (1) [Caution]: the logic is correct based on the premises:
 //     data processing stage is blocked in stream.
 //     See <module:echarts/stream/Scheduler#performDataProcessorTasks>
-// (2) Only register once when import repeatly.
-//     Should be executed after series filtered and before stack calculation.
+// (2) Only register once when import repeatedly.
+//     Should be executed after series is filtered and before stack calculation.
 export default function dataStack(ecModel: GlobalModel) {
     const stackInfoMap = createHashMap<StackInfo[]>();
     ecModel.eachSeries(function (seriesModel: SeriesModel<SeriesOption & SeriesStackOptionMixin>) {
         const stack = seriesModel.get('stack');
-        // Compatibal: when `stack` is set as '', do not stack.
+        // Compatible: when `stack` is set as '', do not stack.
         if (stack) {
             const stackInfoList = stackInfoMap.get(stack) || stackInfoMap.set(stack, []);
             const data = seriesModel.getData();
@@ -83,10 +87,11 @@ function calculateStack(stackInfoList: StackInfo[]) {
         const dims: [string, string] = [targetStackInfo.stackResultDimension, targetStackInfo.stackedOverDimension];
         const targetData = targetStackInfo.data;
         const isStackedByIndex = targetStackInfo.isStackedByIndex;
+        const stackStrategy = targetStackInfo.seriesModel.get('stackStrategy') || 'samesign';
 
         // Should not write on raw data, because stack series model list changes
         // depending on legend selection.
-        const newData = targetData.map(dims, function (v0, v1, dataIndex) {
+        targetData.modify(dims, function (v0, v1, dataIndex) {
             let sum = targetData.get(targetStackInfo.stackedDimension, dataIndex) as number;
 
             // Consider `connectNulls` of line area, if value is NaN, stackedOver
@@ -122,10 +127,17 @@ function calculateStack(stackInfoList: StackInfo[]) {
                     ) as number;
 
                     // Considering positive stack, negative stack and empty data
-                    if ((sum >= 0 && val > 0) // Positive stack
-                        || (sum <= 0 && val < 0) // Negative stack
+                    if (
+                        stackStrategy === 'all' // single stack group
+                        || (stackStrategy === 'positive' && val > 0)
+                        || (stackStrategy === 'negative' && val < 0)
+                        || (stackStrategy === 'samesign' && sum >= 0 && val > 0) // All positive stack
+                        || (stackStrategy === 'samesign' && sum <= 0 && val < 0) // All negative stack
                     ) {
-                        sum += val;
+                        // The sum has to be very small to be affected by the
+                        // floating arithmetic problem. An incorrect result will probably
+                        // cause axis min/max to be filtered incorrectly.
+                        sum = addSafe(sum, val);
                         stackedOver = val;
                         break;
                     }
@@ -137,9 +149,5 @@ function calculateStack(stackInfoList: StackInfo[]) {
 
             return resultVal;
         });
-
-        (targetData.hostModel as SeriesModel).setData(newData);
-        // Update for consequent calculation
-        targetStackInfo.data = newData;
     });
 }

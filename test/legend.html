@@ -22,7 +22,7 @@ under the License.
     <head>
         <meta charset="utf-8">
         <meta name="viewport" content="width=device-width, initial-scale=1" />
-        <script src="lib/esl.js"></script>
+        <script src="lib/simpleRequire.js"></script>
         <script src="lib/config.js"></script>
         <script src="lib/jquery.min.js"></script>
         <script src="lib/facePrint.js"></script>
@@ -72,6 +72,8 @@ under the License.
         <div id="only-single-item"></div>
         <div id="vary-size"></div>
         <div id="index-to-no-name"></div>
+        <h1>Legend page text color should be light in dark mode</h1>
+        <div class="chart" id="dark-pageTextStyle"></div>
 
         <script>
 
@@ -120,14 +122,7 @@ under the License.
 
         <script>
             require([
-                'echarts',
-                // 'echarts/chart/line',
-                // 'echarts/component/title',
-                // 'echarts/component/legend',
-                // 'echarts/component/grid',
-                // 'echarts/component/tooltip',
-                // 'echarts/component/dataZoomInside',
-                // 'zrender/svg/svg'
+                'echarts'
             ], function (echarts) {
 
                 var xAxisData = [];
@@ -201,14 +196,7 @@ under the License.
 
         <script>
             require([
-                'echarts',
-                // 'echarts/chart/line',
-                // 'echarts/component/title',
-                // 'echarts/component/legend',
-                // 'echarts/component/grid',
-                // 'echarts/component/tooltip',
-                // 'echarts/component/dataZoomInside',
-                // 'zrender/svg/svg'
+                'echarts'
             ], function (echarts) {
 
                 var xAxisData = [];
@@ -277,14 +265,7 @@ under the License.
 
         <script>
             require([
-                'echarts',
-                // 'echarts/chart/line',
-                // 'echarts/component/title',
-                // 'echarts/component/legend',
-                // 'echarts/component/grid',
-                // 'echarts/component/tooltip',
-                // 'echarts/component/dataZoomInside',
-                // 'zrender/svg/svg'
+                'echarts'
             ], function (echarts) {
 
                 var xAxisData = [];
@@ -343,14 +324,7 @@ under the License.
 
         <script>
             require([
-                'echarts',
-                // 'echarts/chart/line',
-                // 'echarts/component/title',
-                // 'echarts/component/legend',
-                // 'echarts/component/grid',
-                // 'echarts/component/tooltip',
-                // 'echarts/component/dataZoomInside',
-                // 'zrender/svg/svg'
+                'echarts'
             ], function (echarts) {
 
                 var xAxisData = [];
@@ -411,14 +385,7 @@ under the License.
 
         <script>
             require([
-                'echarts',
-                // 'echarts/chart/line',
-                // 'echarts/component/title',
-                // 'echarts/component/legend',
-                // 'echarts/component/grid',
-                // 'echarts/component/tooltip',
-                // 'echarts/component/dataZoomInside',
-                // 'zrender/svg/svg'
+                'echarts'
             ], function (echarts) {
 
                 var xAxisData = [];
@@ -479,14 +446,7 @@ under the License.
 
         <script>
             require([
-                'echarts',
-                // 'echarts/chart/line',
-                // 'echarts/component/title',
-                // 'echarts/component/legendScroll',
-                // 'echarts/component/grid',
-                // 'echarts/component/tooltip',
-                // 'echarts/component/dataZoomInside',
-                // 'zrender/svg/svg'
+                'echarts'
             ], function (echarts) {
 
                 var xAxisData = [];
@@ -552,14 +512,7 @@ under the License.
 
         <script>
             require([
-                'echarts',
-                // 'echarts/chart/line',
-                // 'echarts/component/title',
-                // 'echarts/component/legendScroll',
-                // 'echarts/component/grid',
-                // 'echarts/component/tooltip',
-                // 'echarts/component/dataZoomInside',
-                // 'zrender/svg/svg'
+                'echarts'
             ], function (echarts) {
 
                 var xAxisData = [];
@@ -629,14 +582,7 @@ under the License.
 
         <script>
             require([
-                'echarts',
-                // 'echarts/chart/line',
-                // 'echarts/component/title',
-                // 'echarts/component/legendScroll',
-                // 'echarts/component/grid',
-                // 'echarts/component/tooltip',
-                // 'echarts/component/dataZoomInside',
-                // 'zrender/svg/svg'
+                'echarts'
             ], function (echarts) {
 
                 var xAxisData = [];
@@ -711,14 +657,7 @@ under the License.
 
         <script>
             require([
-                'echarts',
-                // 'echarts/chart/line',
-                // 'echarts/component/title',
-                // 'echarts/component/legendScroll',
-                // 'echarts/component/grid',
-                // 'echarts/component/tooltip',
-                // 'echarts/component/dataZoomInside',
-                // 'zrender/svg/svg'
+                'echarts'
             ], function (echarts) {
 
                 var xAxisData = [];
@@ -777,14 +716,7 @@ under the License.
 
         <script>
             require([
-                'echarts',
-                // 'echarts/chart/line',
-                // 'echarts/component/title',
-                // 'echarts/component/legendScroll',
-                // 'echarts/component/grid',
-                // 'echarts/component/tooltip',
-                // 'echarts/component/dataZoomInside',
-                // 'zrender/svg/svg'
+                'echarts'
             ], function (echarts) {
 
                 var xAxisData = [];
@@ -1169,6 +1101,30 @@ under the License.
             })
         </script>
 
+        <script>
+            require([
+                'echarts',
+            ], function (echarts) {
 
+                var seriesInfo = makeSeries(5, 3);
+
+                var option = {
+                    legend: [{
+                        type: 'scroll',
+                        width: 200,
+                        data: seriesInfo.legendData
+                    }],
+                    series: seriesInfo.series,
+                    xAxis: {
+                        data: seriesInfo.xAxisData
+                    },
+                    yAxis: {}
+                };
+                var chart = echarts.init(document.getElementById('dark-pageTextStyle'), 'dark', {
+                    renderer: 'svg'
+                });
+                chart.setOption(option);
+            })
+        </script>
     </body>
 </html>

@@ -22,7 +22,7 @@
  */
 
 import * as zrUtil from 'zrender/src/core/util';
-import createListFromArray from '../../chart/helper/createListFromArray';
+import createSeriesData from '../../chart/helper/createSeriesData';
 // import createGraphFromNodeEdge from './chart/helper/createGraphFromNodeEdge';
 import * as axisHelper from '../../coord/axisHelper';
 import {AxisModelCommonMixin} from '../../coord/axisModelCommonMixin';
@@ -40,10 +40,10 @@ import { createTextStyle as innerCreateTextStyle } from '../../label/labelStyle'
 import { DisplayState, TextCommonOption } from '../../util/types';
 
 /**
- * Create a muti dimension List structure from seriesModel.
+ * Create a multi dimension List structure from seriesModel.
  */
 export function createList(seriesModel: SeriesModel) {
-    return createListFromArray(seriesModel.getSource(), seriesModel);
+    return createSeriesData(null, seriesModel);
 }
 
 // export function createGraph(seriesModel) {
@@ -54,7 +54,7 @@ export function createList(seriesModel: SeriesModel) {
 
 export {getLayoutRect};
 
-export {default as createDimensions} from '../../data/helper/createDimensions';
+export {createDimensions} from '../../data/helper/createDimensions';
 
 export const dataStack = {
     isDimensionStacked: isDimensionStacked,
@@ -86,9 +86,9 @@ export function createScale(dataExtent: number[], option: object | AxisBaseModel
         // FIXME
         // Currently AxisModelCommonMixin has nothing to do with the
         // the requirements of `axisHelper.createScaleByModel`. For
-        // example the method `getCategories` and `getOrdinalMeta`
-        // are required for `'category'` axis, and ecModel are required
-        // for `'time'` axis. But occationally echarts-gl happened
+        // example the methods `getCategories` and `getOrdinalMeta`
+        // are required for `'category'` axis, and ecModel is required
+        // for `'time'` axis. But occasionally echarts-gl happened
         // to only use `'value'` axis.
         // zrUtil.mixin(axisModel, AxisModelCommonMixin);
     }
@@ -103,7 +103,7 @@ export function createScale(dataExtent: number[], option: object | AxisBaseModel
 /**
  * Mixin common methods to axis model,
  *
- * Inlcude methods
+ * Include methods
  * `getFormattedLabels() => Array.<string>`
  * `getCategories() => Array.<string>`
  * `getMin(origin: boolean) => number`

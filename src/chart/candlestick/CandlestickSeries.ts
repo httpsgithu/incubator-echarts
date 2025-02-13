@@ -28,21 +28,22 @@ import {
     ColorString,
     SeriesLabelOption,
     SeriesLargeOptionMixin,
-    OptionDataValueNumeric,
     StatesOptionMixin,
     SeriesEncodeOptionMixin,
-    DefaultEmphasisFocus
+    DefaultEmphasisFocus,
+    OptionDataValue
 } from '../../util/types';
-import List from '../../data/List';
+import SeriesData from '../../data/SeriesData';
 import Cartesian2D from '../../coord/cartesian/Cartesian2D';
 import { BrushCommonSelectorsForSeries } from '../../component/brush/selector';
 import { mixin } from 'zrender/src/core/util';
 
-type CandlestickDataValue = OptionDataValueNumeric[];
+type CandlestickDataValue = OptionDataValue[];
 
 interface CandlestickItemStyleOption extends ItemStyleOption {
     color0?: ZRColor
     borderColor0?: ColorString
+    borderColorDoji?: ZRColor
 }
 export interface CandlestickStateOption {
     itemStyle?: CandlestickItemStyleOption
@@ -99,7 +100,7 @@ class CandlestickSeriesModel extends SeriesModel<CandlestickSeriesOption> {
     ];
 
     static defaultOption: CandlestickSeriesOption = {
-        zlevel: 0,
+        // zlevel: 0,
         z: 2,
         coordinateSystem: 'cartesian2d',
         legendHoverLink: true,
@@ -116,13 +117,13 @@ class CandlestickSeriesModel extends SeriesModel<CandlestickSeriesOption> {
             color0: '#47b262', // negative
             borderColor: '#eb5454',
             borderColor0: '#47b262',
+            borderColorDoji: null, // when close === open
             // borderColor: '#d24040',
             // borderColor0: '#398f4f',
             borderWidth: 1
         },
 
         emphasis: {
-            scale: true,
             itemStyle: {
                 borderWidth: 2
             }
@@ -151,7 +152,7 @@ class CandlestickSeriesModel extends SeriesModel<CandlestickSeriesOption> {
         return 'open';
     }
 
-    brushSelector(dataIndex: number, data: List, selectors: BrushCommonSelectorsForSeries): boolean {
+    brushSelector(dataIndex: number, data: SeriesData, selectors: BrushCommonSelectorsForSeries): boolean {
         const itemLayout = data.getItemLayout(dataIndex);
         return itemLayout && selectors.rect(itemLayout.brushRect);
     }

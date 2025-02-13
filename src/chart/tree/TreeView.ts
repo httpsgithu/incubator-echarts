@@ -34,9 +34,9 @@ import Path, { PathProps, PathStyleProps } from 'zrender/src/graphic/Path';
 import GlobalModel from '../../model/Global';
 import ExtensionAPI from '../../core/ExtensionAPI';
 import { TreeNode } from '../../data/Tree';
-import List from '../../data/List';
+import SeriesData from '../../data/SeriesData';
 import { setStatesStylesFromModel, setStatesFlag, setDefaultStateProxy, HOVER_STATE_BLUR } from '../../util/states';
-import { ECElement } from '../../util/types';
+import { AnimationOption, ECElement } from '../../util/types';
 
 type TreeSymbol = SymbolClz & {
     __edge: graphic.BezierCurve | TreePath
@@ -134,15 +134,13 @@ class TreeView extends ChartView {
     private _controller: RoamController;
     private _controllerHost: RoamControllerHost;
 
-    private _data: List<TreeSeriesModel>;
+    private _data: SeriesData<TreeSeriesModel>;
 
     private _nodeScaleRatio: number;
     private _min: number[];
     private _max: number[];
 
     init(ecModel: GlobalModel, api: ExtensionAPI) {
-
-
         this._controller = new RoamController(api.getZr());
 
         this._controllerHost = {
@@ -174,7 +172,7 @@ class TreeView extends ChartView {
             group.y = layoutInfo.y;
         }
 
-        this._updateViewCoordSys(seriesModel);
+        this._updateViewCoordSys(seriesModel, api);
         this._updateController(seriesModel, ecModel, api);
 
         const oldData = this._data;
@@ -226,7 +224,7 @@ class TreeView extends ChartView {
         this._data = data;
     }
 
-    _updateViewCoordSys(seriesModel: TreeSeriesModel) {
+    _updateViewCoordSys(seriesModel: TreeSeriesModel, api: ExtensionAPI) {
         const data = seriesModel.getData();
         const points: number[][] = [];
         data.each(function (idx) {
@@ -259,7 +257,7 @@ class TreeView extends ChartView {
 
         viewCoordSys.setBoundingRect(min[0], min[1], max[0] - min[0], max[1] - min[1]);
 
-        viewCoordSys.setCenter(seriesModel.get('center'));
+        viewCoordSys.setCenter(seriesModel.get('center'), api);
         viewCoordSys.setZoom(seriesModel.get('zoom'));
 
         // Here we use viewCoordSys just for computing the 'position' and 'scale' of the group
@@ -358,7 +356,7 @@ class TreeView extends ChartView {
 
 }
 
-function symbolNeedsDraw(data: List, dataIndex: number) {
+function symbolNeedsDraw(data: SeriesData, dataIndex: number) {
     const layout = data.getItemLayout(dataIndex);
 
     return layout
@@ -367,7 +365,7 @@ function symbolNeedsDraw(data: List, dataIndex: number) {
 
 
 function updateNode(
-    data: List,
+    data: SeriesData,
     dataIndex: number,
     symbolEl: TreeSymbol,
     group: graphic.Group,
@@ -435,7 +433,7 @@ function updateNode(
         let rad;
         let isLeft;
 
-        if (targetLayout.x === rootLayout.x && node.isExpand === true) {
+        if (targetLayout.x === rootLayout.x && node.isExpand === true && realRoot.children.length) {
             const center = {
                 x: (realRoot.children[0].getLayout().x + realRoot.children[length - 1].getLayout().x) / 2,
                 y: (realRoot.children[0].getLayout().y + realRoot.children[length - 1].getLayout().y) / 2
@@ -487,9 +485,11 @@ function updateNode(
 
     // Handle status
     const focus = itemModel.get(['emphasis', 'focus']);
-    const focusDataIndices: number[] = focus === 'ancestor'
-        ? node.getAncestorsIndices()
-        : focus === 'descendant' ? node.getDescendantIndices() : null;
+    const focusDataIndices: number[] = focus === 'relative'
+        ? zrUtil.concatArray(node.getAncestorsIndices(), node.getDescendantIndices()) as number[]
+        : focus === 'ancestor'
+            ? node.getAncestorsIndices()
+            : focus === 'descendant' ? node.getDescendantIndices() : null;
 
     if (focusDataIndices) {
         // Modify the focus to data indices.
@@ -535,6 +535,8 @@ function drawEdge(
     const edgeForkPosition = seriesModel.get('edgeForkPosition');
     const lineStyle = itemModel.getModel('lineStyle').getLineStyle();
     let edge = symbolEl.__edge;
+    // curve edge from node -> parent
+    // polyline edge from node -> children
     if (edgeShape === 'curve') {
         if (node.parentNode && node.parentNode !== virtualRoot) {
             if (!edge) {
@@ -583,7 +585,8 @@ function drawEdge(
         }
     }
 
-    if (edge) {
+    // show all edge when edgeShape is 'curve', filter node `isExpand` is false when edgeShape is 'polyline'
+    if (edge && !(edgeShape === 'polyline' && !node.isExpand)) {
         edge.useStyle(zrUtil.defaults({
             strokeNoScale: true, fill: null
         }, lineStyle));
@@ -595,44 +598,21 @@ function drawEdge(
     }
 }
 
-function removeNode(
-    data: List,
-    dataIndex: number,
-    symbolEl: TreeSymbol,
+function removeNodeEdge(
+    node: TreeNode,
+    data: SeriesData,
     group: graphic.Group,
-    seriesModel: TreeSeriesModel
+    seriesModel: TreeSeriesModel,
+    removeAnimationOpt: AnimationOption
 ) {
-    const node = data.tree.getNodeByDataIndex(dataIndex);
     const virtualRoot = data.tree.root;
+    const { source, sourceLayout } = getSourceNode(virtualRoot, node);
 
-    let source = node.parentNode === virtualRoot ? node : node.parentNode || node;
-    // let edgeShape = seriesScope.edgeShape;
-    let sourceLayout;
-    while (sourceLayout = source.getLayout(), sourceLayout == null) {
-        source = source.parentNode === virtualRoot ? source : source.parentNode || source;
+    const symbolEl: TreeSymbol = data.getItemGraphicEl(node.dataIndex) as TreeSymbol;
+
+    if (!symbolEl) {
+        return;
     }
-
-    // Use same duration and easing with update to have more consistent animation.
-    const removeAnimationOpt = {
-        duration: seriesModel.get('animationDurationUpdate') as number,
-        easing: seriesModel.get('animationEasingUpdate')
-    };
-
-    graphic.removeElement(symbolEl, {
-        x: sourceLayout.x + 1,
-        y: sourceLayout.y + 1
-    }, seriesModel, {
-        cb() {
-            group.remove(symbolEl);
-            data.setItemGraphicEl(dataIndex, null);
-        },
-        removeOpt: removeAnimationOpt
-    });
-
-    symbolEl.fadeOut(null, {
-        fadeLabel: true,
-        animation: removeAnimationOpt
-    });
 
     const sourceSymbolEl = data.getItemGraphicEl(source.dataIndex) as TreeSymbol;
     const sourceEdge = sourceSymbolEl.__edge;
@@ -686,6 +666,60 @@ function removeNode(
             });
         }
     }
+}
+
+function getSourceNode(virtualRoot: TreeNode, node: TreeNode): { source: TreeNode, sourceLayout: TreeNodeLayout } {
+    let source = node.parentNode === virtualRoot ? node : node.parentNode || node;
+    let sourceLayout;
+    while (sourceLayout = source.getLayout(), sourceLayout == null) {
+        source = source.parentNode === virtualRoot ? source : source.parentNode || source;
+    }
+    return {
+        source,
+        sourceLayout
+    };
+}
+
+function removeNode(
+    data: SeriesData,
+    dataIndex: number,
+    symbolEl: TreeSymbol,
+    group: graphic.Group,
+    seriesModel: TreeSeriesModel
+) {
+    const node = data.tree.getNodeByDataIndex(dataIndex);
+    const virtualRoot = data.tree.root;
+
+    const { sourceLayout } = getSourceNode(virtualRoot, node);
+
+    // Use same duration and easing with update to have more consistent animation.
+    const removeAnimationOpt = {
+        duration: seriesModel.get('animationDurationUpdate') as number,
+        easing: seriesModel.get('animationEasingUpdate')
+    };
+
+    graphic.removeElement(symbolEl, {
+        x: sourceLayout.x + 1,
+        y: sourceLayout.y + 1
+    }, seriesModel, {
+        cb() {
+            group.remove(symbolEl);
+            data.setItemGraphicEl(dataIndex, null);
+        },
+        removeOpt: removeAnimationOpt
+    });
+
+    symbolEl.fadeOut(null, data.hostModel as TreeSeriesModel, {
+        fadeLabel: true,
+        animation: removeAnimationOpt
+    });
+
+    // remove edge as parent node
+    node.children.forEach(childNode => {
+        removeNodeEdge(childNode, data, group, seriesModel, removeAnimationOpt);
+    });
+    // remove edge as child node
+    removeNodeEdge(node, data, group, seriesModel, removeAnimationOpt);
 }
 
 function getEdgeShape(

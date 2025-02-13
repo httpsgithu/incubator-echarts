@@ -42,8 +42,6 @@ interface MinMaxSpan {
     maxValueSpan: number
 }
 
-type SupportedAxis = 'xAxis' | 'yAxis' | 'angleAxis' | 'radiusAxis' | 'singleAxis';
-
 /**
  * Operate single axis.
  * One axis can only operated by one axis operator.
@@ -139,8 +137,8 @@ class AxisProxy {
     calculateDataWindow(opt?: {
         start?: number
         end?: number
-        startValue?: number
-        endValue?: number
+        startValue?: number | string | Date
+        endValue?: number | string | Date
     }) {
         const dataExtent = this._dataExtent;
         const axisModel = this.getAxisModel();
@@ -189,15 +187,20 @@ class AxisProxy {
 
             // valueWindow[idx] = round(boundValue);
             // percentWindow[idx] = round(boundPercent);
-            valueWindow[idx] = boundValue;
-            percentWindow[idx] = boundPercent;
+            // fallback to extent start/end when parsed value or percent is invalid
+            valueWindow[idx] = boundValue == null || isNaN(boundValue)
+                ? dataExtent[idx]
+                : boundValue;
+            percentWindow[idx] = boundPercent == null || isNaN(boundPercent)
+                ? percentExtent[idx]
+                : boundPercent;
         });
 
         asc(valueWindow);
         asc(percentWindow);
 
         // The windows from user calling of `dispatchAction` might be out of the extent,
-        // or do not obey the `min/maxSpan`, `min/maxValueSpan`. But we dont restrict window
+        // or do not obey the `min/maxSpan`, `min/maxValueSpan`. But we don't restrict window
         // by `zoomLock` here, because we see `zoomLock` just as a interaction constraint,
         // where API is able to initialize/modify the window size even though `zoomLock`
         // specified.
@@ -232,8 +235,8 @@ class AxisProxy {
     }
 
     /**
-     * Notice: reset should not be called before series.restoreData() called,
-     * so it is recommanded to be called in "process stage" but not "model init
+     * Notice: reset should not be called before series.restoreData() is called,
+     * so it is recommended to be called in "process stage" but not "model init
      * stage".
      */
     reset(dataZoomModel: DataZoomModel) {
@@ -244,16 +247,6 @@ class AxisProxy {
         const targetSeries = this.getTargetSeriesModels();
         // Culculate data window and data extent, and record them.
         this._dataExtent = calculateDataExtent(this, this._dimName, targetSeries);
-
-        // this.hasSeriesStacked = false;
-        // each(targetSeries, function (series) {
-            // let data = series.getData();
-            // let dataDim = data.mapDimension(this._dimName);
-            // let stackedDimension = data.getCalculationInfo('stackedDimension');
-            // if (stackedDimension && stackedDimension === dataDim) {
-                // this.hasSeriesStacked = true;
-            // }
-        // }, this);
 
         // `calculateDataWindow` uses min/maxSpan.
         this._updateMinMaxSpan();
@@ -311,12 +304,14 @@ class AxisProxy {
             }
 
             if (filterMode === 'weakFilter') {
+                const store = seriesData.getStore();
+                const dataDimIndices = zrUtil.map(dataDims, dim => seriesData.getDimensionIndex(dim), seriesData);
                 seriesData.filterSelf(function (dataIndex) {
                     let leftOut;
                     let rightOut;
                     let hasValue;
                     for (let i = 0; i < dataDims.length; i++) {
-                        const value = seriesData.get(dataDims[i], dataIndex) as number;
+                        const value = store.get(dataDimIndices[i], dataIndex) as number;
                         const thisHasValue = !isNaN(value);
                         const thisLeftOut = value < valueWindow[0];
                         const thisRightOut = value > valueWindow[1];

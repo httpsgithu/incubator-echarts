@@ -17,23 +17,18 @@
 * under the License.
 */
 
-/* global Float32Array */
-
-import * as zrUtil from 'zrender/src/core/util';
-import {parsePercent} from '../util/number';
-import {isDimensionStacked} from '../data/helper/dataStackHelper';
+import { each, defaults, keys } from 'zrender/src/core/util';
+import { parsePercent } from '../util/number';
+import { isDimensionStacked } from '../data/helper/dataStackHelper';
 import createRenderPlanner from '../chart/helper/createRenderPlanner';
 import BarSeriesModel from '../chart/bar/BarSeries';
 import Axis2D from '../coord/cartesian/Axis2D';
 import GlobalModel from '../model/Global';
 import type Cartesian2D from '../coord/cartesian/Cartesian2D';
 import { StageHandler, Dictionary } from '../util/types';
+import { createFloat32Array } from '../util/vendor';
 
 const STACK_PREFIX = '__ec_stack_';
-const LARGE_BAR_MIN_WIDTH = 0.5;
-
-const LargeArr = typeof Float32Array !== 'undefined' ? Float32Array : Array;
-
 
 function getSeriesStackId(seriesModel: BarSeriesModel): string {
     return seriesModel.get('stack') || STACK_PREFIX + seriesModel.seriesIndex;
@@ -77,11 +72,11 @@ type BarWidthAndOffset = Dictionary<Dictionary<{
 export interface BarGridLayoutOptionForCustomSeries {
     count: number
 
-    barWidth?: number
-    barMaxWidth?: number
-    barMinWidth?: number
-    barGap?: number
-    barCategoryGap?: number
+    barWidth?: number | string
+    barMaxWidth?: number | string
+    barMinWidth?: number | string
+    barGap?: number | string
+    barCategoryGap?: number | string
 }
 interface LayoutOption extends BarGridLayoutOptionForCustomSeries {
     axis: Axis2D
@@ -102,7 +97,7 @@ export function getLayoutOnAxis(opt: LayoutOption): BarGridLayoutResult {
     const bandWidth = baseAxis.getBandWidth();
 
     for (let i = 0; i < opt.count || 0; i++) {
-        params.push(zrUtil.defaults({
+        params.push(defaults({
             bandWidth: bandWidth,
             axisKey: axisKey,
             stackId: STACK_PREFIX + i
@@ -124,7 +119,7 @@ export function prepareLayoutBarSeries(seriesType: string, ecModel: GlobalModel)
     const seriesModels: BarSeriesModel[] = [];
     ecModel.eachSeriesByType(seriesType, function (seriesModel: BarSeriesModel) {
         // Check series coordinate, do layout for cartesian2d only
-        if (isOnCartesian(seriesModel) && !isInLargeMode(seriesModel)) {
+        if (isOnCartesian(seriesModel)) {
             seriesModels.push(seriesModel);
         }
     });
@@ -149,7 +144,7 @@ function getValueAxesMinGaps(barSeries: BarSeriesModel[]) {
      * series.
      */
     const axisValues: Dictionary<number[]> = {};
-    zrUtil.each(barSeries, function (seriesModel) {
+    each(barSeries, function (seriesModel) {
         const cartesian = seriesModel.coordinateSystem as Cartesian2D;
         const baseAxis = cartesian.getBaseAxis();
         if (baseAxis.type !== 'time' && baseAxis.type !== 'value') {
@@ -158,9 +153,10 @@ function getValueAxesMinGaps(barSeries: BarSeriesModel[]) {
 
         const data = seriesModel.getData();
         const key = baseAxis.dim + '_' + baseAxis.index;
-        const dim = data.mapDimension(baseAxis.dim);
-        for (let i = 0, cnt = data.count(); i < cnt; ++i) {
-            const value = data.get(dim, i) as number;
+        const dimIdx = data.getDimensionIndex(data.mapDimension(baseAxis.dim));
+        const store = data.getStore();
+        for (let i = 0, cnt = store.count(); i < cnt; ++i) {
+            const value = store.get(dimIdx, i) as number;
             if (!axisValues[key]) {
                 // No previous data for the axis
                 axisValues[key] = [value];
@@ -203,7 +199,7 @@ export function makeColumnLayout(barSeries: BarSeriesModel[]) {
     const axisMinGaps = getValueAxesMinGaps(barSeries);
 
     const seriesInfoList: LayoutSeriesInfo[] = [];
-    zrUtil.each(barSeries, function (seriesModel) {
+    each(barSeries, function (seriesModel) {
         const cartesian = seriesModel.coordinateSystem as Cartesian2D;
         const baseAxis = cartesian.getBaseAxis();
         const axisExtent = baseAxis.getExtent();
@@ -234,9 +230,9 @@ export function makeColumnLayout(barSeries: BarSeriesModel[]) {
             seriesModel.get('barMaxWidth'), bandWidth
         );
         const barMinWidth = parsePercent(
-            // barMinWidth by default is 1 in cartesian. Because in value axis,
-            // the auto-calculated bar width might be less than 1.
-            seriesModel.get('barMinWidth') || 1, bandWidth
+            // barMinWidth by default is 0.5 / 1 in cartesian. Because in value axis,
+            // the auto-calculated bar width might be less than 0.5 / 1.
+            seriesModel.get('barMinWidth') || (isInLargeMode(seriesModel) ? 0.5 : 1), bandWidth
         );
         const barGap = seriesModel.get('barGap');
         const barCategoryGap = seriesModel.get('barCategoryGap');
@@ -269,7 +265,7 @@ function doCalBarWidthAndOffset(seriesInfoList: LayoutSeriesInfo[]) {
     // Columns info on each category axis. Key is cartesian name
     const columnsMap: Dictionary<ColumnOnAxisInfo> = {};
 
-    zrUtil.each(seriesInfoList, function (seriesInfo, idx) {
+    each(seriesInfoList, function (seriesInfo, idx) {
         const axisKey = seriesInfo.axisKey;
         const bandWidth = seriesInfo.bandWidth;
         const columnsOnAxis: ColumnOnAxisInfo = columnsMap[axisKey] || {
@@ -318,7 +314,7 @@ function doCalBarWidthAndOffset(seriesInfoList: LayoutSeriesInfo[]) {
 
     const result: BarWidthAndOffset = {};
 
-    zrUtil.each(columnsMap, function (columnsOnAxis, coordSysName) {
+    each(columnsMap, function (columnsOnAxis, coordSysName) {
 
         result[coordSysName] = {};
 
@@ -326,7 +322,7 @@ function doCalBarWidthAndOffset(seriesInfoList: LayoutSeriesInfo[]) {
         const bandWidth = columnsOnAxis.bandWidth;
         let categoryGapPercent = columnsOnAxis.categoryGap;
         if (categoryGapPercent == null) {
-            const columnCount = zrUtil.keys(stacks).length;
+            const columnCount = keys(stacks).length;
             // More columns in one group
             // the spaces between group is smaller. Or the column will be too thin.
             categoryGapPercent = Math.max((35 - columnCount * 4), 15) + '%';
@@ -342,7 +338,7 @@ function doCalBarWidthAndOffset(seriesInfoList: LayoutSeriesInfo[]) {
         autoWidth = Math.max(autoWidth, 0);
 
         // Find if any auto calculated bar exceeded maxBarWidth
-        zrUtil.each(stacks, function (column) {
+        each(stacks, function (column) {
             const maxWidth = column.maxWidth;
             const minWidth = column.minWidth;
 
@@ -351,7 +347,7 @@ function doCalBarWidthAndOffset(seriesInfoList: LayoutSeriesInfo[]) {
                 if (maxWidth && maxWidth < finalWidth) {
                     finalWidth = Math.min(maxWidth, remainedWidth);
                 }
-                // `minWidth` has higher priority. `minWidth` decide that wheter the
+                // `minWidth` has higher priority. `minWidth` decide that whether the
                 // bar is able to be visible. So `minWidth` should not be restricted
                 // by `maxWidth` or `remainedWidth` (which is from `bandWidth`). In
                 // the extreme cases for `value` axis, bars are allowed to overlap
@@ -367,7 +363,7 @@ function doCalBarWidthAndOffset(seriesInfoList: LayoutSeriesInfo[]) {
             }
             else {
                 // `barMinWidth/barMaxWidth` has higher priority than `barWidth`, as
-                // CSS does. Becuase barWidth can be a percent value, where
+                // CSS does. Because barWidth can be a percent value, where
                 // `barMaxWidth` can be used to restrict the final width.
                 let finalWidth = column.width;
                 if (maxWidth) {
@@ -392,7 +388,7 @@ function doCalBarWidthAndOffset(seriesInfoList: LayoutSeriesInfo[]) {
 
         let widthSum = 0;
         let lastColumn: StackInfo;
-        zrUtil.each(stacks, function (column, idx) {
+        each(stacks, function (column, idx) {
             if (!column.width) {
                 column.width = autoWidth;
             }
@@ -404,7 +400,7 @@ function doCalBarWidthAndOffset(seriesInfoList: LayoutSeriesInfo[]) {
         }
 
         let offset = -widthSum / 2;
-        zrUtil.each(stacks, function (column, stackId) {
+        each(stacks, function (column, stackId) {
             result[coordSysName][stackId] = result[coordSysName][stackId] || {
                 bandWidth: bandWidth,
                 offset: offset,
@@ -446,9 +442,7 @@ export function layout(seriesType: string, ecModel: GlobalModel) {
     const seriesModels = prepareLayoutBarSeries(seriesType, ecModel);
     const barWidthAndOffset = makeColumnLayout(seriesModels);
 
-    const lastStackCoords: Dictionary<{p: number, n: number}[]> = {};
-
-    zrUtil.each(seriesModels, function (seriesModel) {
+    each(seriesModels, function (seriesModel) {
 
         const data = seriesModel.getData();
         const cartesian = seriesModel.coordinateSystem as Cartesian2D;
@@ -458,163 +452,145 @@ export function layout(seriesType: string, ecModel: GlobalModel) {
         const columnLayoutInfo = barWidthAndOffset[getAxisKey(baseAxis)][stackId];
         const columnOffset = columnLayoutInfo.offset;
         const columnWidth = columnLayoutInfo.width;
-        const valueAxis = cartesian.getOtherAxis(baseAxis);
-
-        const barMinHeight = seriesModel.get('barMinHeight') || 0;
-
-        lastStackCoords[stackId] = lastStackCoords[stackId] || [];
 
         data.setLayout({
             bandWidth: columnLayoutInfo.bandWidth,
             offset: columnOffset,
             size: columnWidth
         });
-
-        const valueDim = data.mapDimension(valueAxis.dim);
-        const baseDim = data.mapDimension(baseAxis.dim);
-        const stacked = isDimensionStacked(data, valueDim /*, baseDim*/);
-        const isValueAxisH = valueAxis.isHorizontal();
-
-        const valueAxisStart = getValueAxisStart(baseAxis, valueAxis, stacked);
-
-        for (let idx = 0, len = data.count(); idx < len; idx++) {
-            const value = data.get(valueDim, idx);
-            const baseValue = data.get(baseDim, idx) as number;
-
-            const sign = value >= 0 ? 'p' : 'n' as 'p' | 'n';
-            let baseCoord = valueAxisStart;
-
-            // Because of the barMinHeight, we can not use the value in
-            // stackResultDimension directly.
-            if (stacked) {
-                // Only ordinal axis can be stacked.
-                if (!lastStackCoords[stackId][baseValue]) {
-                    lastStackCoords[stackId][baseValue] = {
-                        p: valueAxisStart, // Positive stack
-                        n: valueAxisStart  // Negative stack
-                    };
-                }
-                // Should also consider #4243
-                baseCoord = lastStackCoords[stackId][baseValue][sign];
-            }
-
-            let x;
-            let y;
-            let width;
-            let height;
-
-            if (isValueAxisH) {
-                const coord = cartesian.dataToPoint([value, baseValue]);
-                x = baseCoord;
-                y = coord[1] + columnOffset;
-                width = coord[0] - valueAxisStart;
-                height = columnWidth;
-
-                if (Math.abs(width) < barMinHeight) {
-                    width = (width < 0 ? -1 : 1) * barMinHeight;
-                }
-                // Ignore stack from NaN value
-                if (!isNaN(width)) {
-                    stacked && (lastStackCoords[stackId][baseValue][sign] += width);
-                }
-            }
-            else {
-                const coord = cartesian.dataToPoint([baseValue, value]);
-                x = coord[0] + columnOffset;
-                y = baseCoord;
-                width = columnWidth;
-                height = coord[1] - valueAxisStart;
-
-                if (Math.abs(height) < barMinHeight) {
-                    // Include zero to has a positive bar
-                    height = (height <= 0 ? -1 : 1) * barMinHeight;
-                }
-                // Ignore stack from NaN value
-                if (!isNaN(height)) {
-                    stacked && (lastStackCoords[stackId][baseValue][sign] += height);
-                }
-            }
-
-            data.setItemLayout(idx, {
-                x: x,
-                y: y,
-                width: width,
-                height: height
-            });
-        }
-
     });
 }
 
 // TODO: Do not support stack in large mode yet.
-export const largeLayout: StageHandler = {
+export function createProgressiveLayout(seriesType: string): StageHandler {
+    return {
+        seriesType,
 
-    seriesType: 'bar',
+        plan: createRenderPlanner(),
 
-    plan: createRenderPlanner(),
-
-    reset: function (seriesModel: BarSeriesModel) {
-        if (!isOnCartesian(seriesModel) || !isInLargeMode(seriesModel)) {
-            return;
-        }
-
-        const data = seriesModel.getData();
-        const cartesian = seriesModel.coordinateSystem as Cartesian2D;
-        const coordLayout = cartesian.master.getRect();
-        const baseAxis = cartesian.getBaseAxis();
-        const valueAxis = cartesian.getOtherAxis(baseAxis);
-        const valueDim = data.mapDimension(valueAxis.dim);
-        const baseDim = data.mapDimension(baseAxis.dim);
-        const valueAxisHorizontal = valueAxis.isHorizontal();
-        const valueDimIdx = valueAxisHorizontal ? 0 : 1;
-
-        let barWidth = retrieveColumnLayout(
-            makeColumnLayout([seriesModel]), baseAxis, seriesModel
-        ).width;
-        if (!(barWidth > LARGE_BAR_MIN_WIDTH)) { // jshint ignore:line
-            barWidth = LARGE_BAR_MIN_WIDTH;
-        }
-
-        return {
-            progress: function (params, data) {
-                const count = params.count;
-                const largePoints = new LargeArr(count * 2);
-                const largeBackgroundPoints = new LargeArr(count * 2);
-                const largeDataIndices = new LargeArr(count);
-                let dataIndex;
-                let coord: number[] = [];
-                const valuePair = [];
-                let pointsOffset = 0;
-                let idxOffset = 0;
-
-                while ((dataIndex = params.next()) != null) {
-                    valuePair[valueDimIdx] = data.get(valueDim, dataIndex);
-                    valuePair[1 - valueDimIdx] = data.get(baseDim, dataIndex);
-
-                    coord = cartesian.dataToPoint(valuePair, null, coord);
-                    // Data index might not be in order, depends on `progressiveChunkMode`.
-                    largeBackgroundPoints[pointsOffset] =
-                        valueAxisHorizontal ? coordLayout.x + coordLayout.width : coord[0];
-                    largePoints[pointsOffset++] = coord[0];
-                    largeBackgroundPoints[pointsOffset] =
-                        valueAxisHorizontal ? coord[1] : coordLayout.y + coordLayout.height;
-                    largePoints[pointsOffset++] = coord[1];
-                    largeDataIndices[idxOffset++] = dataIndex;
-                }
-
-                data.setLayout({
-                    largePoints: largePoints,
-                    largeDataIndices: largeDataIndices,
-                    largeBackgroundPoints: largeBackgroundPoints,
-                    barWidth: barWidth,
-                    valueAxisStart: getValueAxisStart(baseAxis, valueAxis, false),
-                    backgroundStart: valueAxisHorizontal ? coordLayout.x : coordLayout.y,
-                    valueAxisHorizontal: valueAxisHorizontal
-                });
+        reset: function (seriesModel: BarSeriesModel) {
+            if (!isOnCartesian(seriesModel)) {
+                return;
             }
-        };
-    }
-};
+
+            const data = seriesModel.getData();
+
+            const cartesian = seriesModel.coordinateSystem as Cartesian2D;
+            const baseAxis = cartesian.getBaseAxis();
+            const valueAxis = cartesian.getOtherAxis(baseAxis);
+            const valueDimIdx = data.getDimensionIndex(data.mapDimension(valueAxis.dim));
+            const baseDimIdx = data.getDimensionIndex(data.mapDimension(baseAxis.dim));
+            const drawBackground = seriesModel.get('showBackground', true);
+            const valueDim = data.mapDimension(valueAxis.dim);
+            const stackResultDim = data.getCalculationInfo('stackResultDimension');
+            const stacked = isDimensionStacked(data, valueDim) && !!data.getCalculationInfo('stackedOnSeries');
+            const isValueAxisH = valueAxis.isHorizontal();
+            const valueAxisStart = getValueAxisStart(baseAxis, valueAxis);
+            const isLarge = isInLargeMode(seriesModel);
+            const barMinHeight = seriesModel.get('barMinHeight') || 0;
+
+            const stackedDimIdx = stackResultDim && data.getDimensionIndex(stackResultDim);
+
+            // Layout info.
+            const columnWidth = data.getLayout('size');
+            const columnOffset = data.getLayout('offset');
+
+            return {
+                progress: function (params, data) {
+                    const count = params.count;
+                    const largePoints = isLarge && createFloat32Array(count * 3);
+                    const largeBackgroundPoints = isLarge && drawBackground && createFloat32Array(count * 3);
+                    const largeDataIndices = isLarge && createFloat32Array(count);
+                    const coordLayout = cartesian.master.getRect();
+                    const bgSize = isValueAxisH ? coordLayout.width : coordLayout.height;
+
+                    let dataIndex;
+                    const store = data.getStore();
+
+                    let idxOffset = 0;
+
+                    while ((dataIndex = params.next()) != null) {
+                        const value = store.get(stacked ? stackedDimIdx : valueDimIdx, dataIndex);
+                        const baseValue = store.get(baseDimIdx, dataIndex) as number;
+                        let baseCoord = valueAxisStart;
+                        let stackStartValue;
+
+                        // Because of the barMinHeight, we can not use the value in
+                        // stackResultDimension directly.
+                        if (stacked) {
+                            stackStartValue = +value - (store.get(valueDimIdx, dataIndex) as number);
+                        }
+
+                        let x;
+                        let y;
+                        let width;
+                        let height;
+
+                        if (isValueAxisH) {
+                            const coord = cartesian.dataToPoint([value, baseValue]);
+                            if (stacked) {
+                                const startCoord = cartesian.dataToPoint([stackStartValue, baseValue]);
+                                baseCoord = startCoord[0];
+                            }
+                            x = baseCoord;
+                            y = coord[1] + columnOffset;
+                            width = coord[0] - baseCoord;
+                            height = columnWidth;
+
+                            if (Math.abs(width) < barMinHeight) {
+                                width = (width < 0 ? -1 : 1) * barMinHeight;
+                            }
+                        }
+                        else {
+                            const coord = cartesian.dataToPoint([baseValue, value]);
+                            if (stacked) {
+                                const startCoord = cartesian.dataToPoint([baseValue, stackStartValue]);
+                                baseCoord = startCoord[1];
+                            }
+                            x = coord[0] + columnOffset;
+                            y = baseCoord;
+                            width = columnWidth;
+                            height = coord[1] - baseCoord;
+
+                            if (Math.abs(height) < barMinHeight) {
+                                // Include zero to has a positive bar
+                                height = (height <= 0 ? -1 : 1) * barMinHeight;
+                            }
+                        }
+
+                        if (!isLarge) {
+                            data.setItemLayout(dataIndex, { x, y, width, height });
+                        }
+                        else {
+                            largePoints[idxOffset] = x;
+                            largePoints[idxOffset + 1] = y;
+                            largePoints[idxOffset + 2] = isValueAxisH ? width : height;
+
+                            if (largeBackgroundPoints) {
+                                largeBackgroundPoints[idxOffset] = isValueAxisH ? coordLayout.x : x;
+                                largeBackgroundPoints[idxOffset + 1] = isValueAxisH ? y : coordLayout.y;
+                                largeBackgroundPoints[idxOffset + 2] = bgSize;
+                            }
+
+                            largeDataIndices[dataIndex] = dataIndex;
+                        }
+
+                        idxOffset += 3;
+                    }
+
+                    if (isLarge) {
+                        data.setLayout({
+                            largePoints,
+                            largeDataIndices,
+                            largeBackgroundPoints,
+                            valueAxisHorizontal: isValueAxisH
+                        });
+                    }
+                }
+            };
+        }
+    };
+}
 
 function isOnCartesian(seriesModel: BarSeriesModel) {
     return seriesModel.coordinateSystem && seriesModel.coordinateSystem.type === 'cartesian2d';
@@ -625,6 +601,14 @@ function isInLargeMode(seriesModel: BarSeriesModel) {
 }
 
 // See cases in `test/bar-start.html` and `#7412`, `#8747`.
-function getValueAxisStart(baseAxis: Axis2D, valueAxis: Axis2D, stacked?: boolean) {
-    return valueAxis.toGlobalCoord(valueAxis.dataToCoord(valueAxis.type === 'log' ? 1 : 0));
+function getValueAxisStart(baseAxis: Axis2D, valueAxis: Axis2D) {
+    let startValue = valueAxis.model.get('startValue');
+    if (!startValue) {
+        startValue = 0;
+    }
+    return valueAxis.toGlobalCoord(
+        valueAxis.dataToCoord(
+            valueAxis.type === 'log'
+            ? (startValue > 0 ? startValue : 1)
+            : startValue));
 }

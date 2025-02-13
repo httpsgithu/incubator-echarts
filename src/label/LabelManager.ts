@@ -53,6 +53,7 @@ import { PathStyleProps } from 'zrender/src/graphic/Path';
 import Model from '../model/Model';
 import { prepareLayoutList, hideOverlap, shiftLayoutOnX, shiftLayoutOnY } from './labelLayoutHelper';
 import { labelInner, animateLabelValue } from './labelStyle';
+import { normalizeRadian } from 'zrender/src/contain/util';
 
 interface LabelDesc {
     label: ZRText
@@ -219,6 +220,8 @@ class LabelManager {
             dummyTransformable.scaleX = dummyTransformable.scaleY = 1;
         }
 
+        dummyTransformable.rotation = normalizeRadian(dummyTransformable.rotation);
+
         const host = label.__hostTarget;
         let hostRect;
         if (host) {
@@ -325,7 +328,7 @@ class LabelManager {
             const defaultLabelAttr = labelItem.defaultAttr;
             let layoutOption;
             // TODO A global layout option?
-            if (typeof labelItem.layoutOption === 'function') {
+            if (isFunction(labelItem.layoutOption)) {
                 layoutOption = labelItem.layoutOption(
                     prepareLayoutCallbackParams(labelItem, hostEl)
                 );
@@ -453,7 +456,7 @@ class LabelManager {
             const animationEnabled = seriesModel.isAnimationEnabled();
 
             chartView.group.traverse((child) => {
-                if (child.ignore) {
+                if (child.ignore && !(child as ECElement).forceLabelAnimation) {
                     return true;    // Stop traverse descendants.
                 }
 
@@ -487,10 +490,11 @@ class LabelManager {
 
             const defaultStyle: PathStyleProps = {};
             const visualStyle = data.getItemVisual(dataIndex, 'style');
-            const visualType = data.getVisual('drawType');
-            // Default to be same with main color
-            defaultStyle.stroke = visualStyle[visualType];
-
+            if (visualStyle) {
+                const visualType = data.getVisual('drawType');
+                // Default to be same with main color
+                defaultStyle.stroke = visualStyle[visualType];
+            }
             const labelLineModel = itemModel.getModel('labelLine');
 
             setLabelLineStyle(el, getLabelLineStatesModels(itemModel), defaultStyle);
@@ -504,10 +508,13 @@ class LabelManager {
         const guideLine = el.getTextGuideLine();
         // Animate
         if (textEl
-            && !textEl.ignore
-            && !textEl.invisible
-            && !(el as ECElement).disableLabelAnimation
-            && !isElementRemoved(el)
+            // `forceLabelAnimation` has the highest priority
+            && ((el as ECElement).forceLabelAnimation
+                || !textEl.ignore
+                && !textEl.invisible
+                && !(el as ECElement).disableLabelAnimation
+                && !isElementRemoved(el)
+            )
         ) {
             const layoutStore = labelLayoutInnerStore(textEl);
             const oldLayout = layoutStore.oldLayout;
@@ -589,3 +596,4 @@ class LabelManager {
 
 
 export default LabelManager;
+

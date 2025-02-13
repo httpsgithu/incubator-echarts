@@ -25,7 +25,7 @@ import ExtensionAPI from '../../core/ExtensionAPI';
 import { makeInner } from '../../util/model';
 import SeriesModel from '../../model/Series';
 import Group from 'zrender/src/graphic/Group';
-import { enterBlur } from '../../util/states';
+import { enterBlur, leaveBlur } from '../../util/states';
 
 const inner = makeInner<{
     keep: boolean
@@ -71,14 +71,17 @@ abstract class MarkerView extends ComponentView {
         inner(drawGroup).keep = true;
     }
 
-    blurSeries(seriesModelList: SeriesModel[]) {
+    toggleBlurSeries(seriesModelList: SeriesModel[], isBlur: boolean) {
         each(seriesModelList, seriesModel => {
-            const markerModel = MarkerModel.getMarkerModelFromSeries(seriesModel, this.type as 'markPoint' | 'markLine' | 'markArea');
+            const markerModel = MarkerModel.getMarkerModelFromSeries(
+                seriesModel,
+                this.type as 'markPoint' | 'markLine' | 'markArea'
+            );
             if (markerModel) {
                 const data = markerModel.getData();
                 data.eachItemGraphicEl(function (el) {
                     if (el) {
-                        enterBlur(el);
+                        isBlur ? enterBlur(el) : leaveBlur(el);
                     }
                 });
             }

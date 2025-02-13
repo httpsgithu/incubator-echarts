@@ -22,7 +22,7 @@ under the License.
     <head>
         <meta charset="utf-8">
         <meta name="viewport" content="width=device-width, initial-scale=1" />
-        <script src="./lib/esl.js"></script>
+        <script src="./lib/simpleRequire.js"></script>
         <script src="./lib/config.js"></script>
         <script src="./lib/facePrint.js"></script>
         <script src="lib/testHelper.js"></script>
@@ -103,8 +103,6 @@ under the License.
             })
         </script>
 
-
-
         <div class="chart" id="scatter-clip-polar"></div>
         <script>
             require([
@@ -115,6 +113,19 @@ under the License.
                 for (var i = 0; i < 100; i++) {
                     data1.push([Math.random() * 10, Math.random() * 360]);
                 }
+
+                data1.push({
+                    value: [5, 82],
+                    name: 'Shrink the page, this poi👆nt shouldn\'t be clipped',
+                    itemStyle: {
+                        color: 'red'
+                    },
+                    label: {
+                        show: true,
+                        formatter: '{b}',
+                        position: 'bottom'
+                    }
+                });
 
                 var option = {
                     polar: {},
@@ -1210,7 +1221,7 @@ under the License.
         <script>
             require([
                 'echarts',
-                'data/stock-DJI.json'
+                'data/stock-DJI.json.js'
             ], function (echarts, rawData) {
                 var option = {
                     dataset: {
@@ -1391,5 +1402,76 @@ under the License.
             })
         </script>
 
+
+        <div class="chart" id="line-clip"></div>
+        <script>
+            require([
+                'echarts'
+            ], function (echarts) {
+                var option = {
+                    xAxis: {
+                        type: 'category',
+                        boundaryGap: false,
+                        data: ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun']
+                    },
+                    yAxis: {
+                        type: 'value'
+                    },
+                    series: [{
+                        data: [820, 932, 901, 934, 1290, 1330, 1320],
+                        type: 'line',
+                        areaStyle: {},
+                        clip: false
+                    }]
+                };
+
+                var chart = testHelper.create(echarts, 'line-clip', {
+                    title: [
+                        'The line chart should be rendered without any error in console when `**clip**` is set as `**false**`'
+                    ],
+                    option: option,
+                    height: 400
+                });
+            });
+        </script>
+
+        <div class="chart" id="polar-clip"></div>
+        <script>
+            require([
+                'echarts'
+            ], function (echarts) {
+                var option = {
+                    polar: {
+                        center: ['50%', '54%']
+                    },
+                    angleAxis: {
+                        type: 'category',
+                        data: ['a', 'b', 'c'],
+                        boundaryGap: false,
+                    },
+                    radiusAxis: {
+                        min: 0
+                    },
+                    series: [{
+                        coordinateSystem: 'polar',
+                        symbolSize: 20,
+                        name: 'line',
+                        type: 'scatter',
+                        showSymbol: true,
+                        data: [
+                            [0, 0],
+                            [10, 2]
+                        ]
+                    }]
+                };
+                var chart = testHelper.create(echarts, 'polar-clip', {
+                    title: [
+                        'The polar coord clip should include center point in scatter'
+                    ],
+                    option: option,
+                    height: 400
+                });
+            });
+        </script>
     </body>
 </html>

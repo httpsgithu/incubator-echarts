@@ -22,7 +22,7 @@ under the License.
     <head>
         <meta charset="utf-8" />
         <meta name="viewport" content="width=device-width, initial-scale=1" />
-        <script src="lib/esl.js"></script>
+        <script src="lib/simpleRequire.js"></script>
         <script src="lib/config.js"></script>
         <script src="lib/jquery.min.js"></script>
     </head>
@@ -39,9 +39,6 @@ under the License.
         <script>
             require([
                 'echarts'
-                // 'echarts/chart/tree',
-                // 'echarts/component/tooltip',
-                // 'echarts/component/legend'
                 ], function (echarts) {
                     var chart = echarts.init(document.getElementById('main'), null, {
 
@@ -238,7 +235,9 @@ under the License.
                                 right: '60%',
 
                                 symbolSize: 7,
-
+                                emphasis: {
+                                    focus: 'relative'
+                                },
                                 label: {
                                     position: 'left',
                                     verticalAlign: 'middle',
@@ -268,7 +267,8 @@ under the License.
                                 left: '70%',
                                 bottom: '22%',
                                 right: '8%',
-
+                                center: ['80%', '10%'],
+                                zoom: 1.2,
                                 symbolSize: 7,
                                 orient: 'RL',
 

@@ -17,6 +17,8 @@
 * under the License.
 */
 
+// TODO: Cases that needs lots of network loading still may fail. Like bmap-xxx
+
 const puppeteer = require('puppeteer');
 const slugify = require('slugify');
 const fse = require('fs-extra');
@@ -24,9 +26,12 @@ const fs = require('fs');
 const path = require('path');
 const program = require('commander');
 const compareScreenshot = require('./compareScreenshot');
-const {testNameFromFile, fileNameFromTest, getVersionDir, buildRuntimeCode, waitTime, getEChartsTestFileName} = require('./util');
+const {testNameFromFile, fileNameFromTest, getVersionDir, buildRuntimeCode, getEChartsTestFileName, waitTime} = require('./util');
 const {origin} = require('./config');
-const Timeline = require('./Timeline');
+const cwebpBin = require('cwebp-bin');
+const { execFile } = require('child_process');
+const {runTasks} = require('./task');
+const chalk = require('chalk');
 
 // Handling input arguments.
 program
@@ -34,23 +39,35 @@ program
     .option('--no-headless', 'Not headless')
     .option('-s, --speed <speed>', 'Playback speed')
     .option('--expected <expected>', 'Expected version')
+    .option('--expected-source <expectedSource>', 'Expected source')
     .option('--actual <actual>', 'Actual version')
+    .option('--actual-source <actualSource>', 'Actual source')
     .option('--renderer <renderer>', 'svg/canvas renderer')
-    .option('--no-save', 'Don\'t save result');
+    .option('--use-coarse-pointer <useCoarsePointer>', '"auto" (by default) or "true" or "false"')
+    .option('--threads <threads>', 'How many threads to run concurrently')
+    .option('--no-save', 'Don\'t save result')
+    .option('--dir <dir>', 'Out dir');
 
 program.parse(process.argv);
 
 program.speed = +program.speed || 1;
 program.actual = program.actual || 'local';
-program.expected = program.expected || '4.2.1';
+program.threads = +program.threads || 1;
 program.renderer = (program.renderer || 'canvas').toLowerCase();
+program.useCoarsePointer = (program.useCoarsePointer || 'auto').toLowerCase();
+program.dir = program.dir || (__dirname + '/tmp');
 
 if (!program.tests) {
     throw new Error('Tests are required');
 }
+if (!program.expected) {
+    throw new Error('Expected version is required');
+}
+
+console.log('Playback Ratio: ', program.speed);
 
 function getScreenshotDir() {
-    return 'tmp/__screenshot__';
+    return `${program.dir}/__screenshot__`;
 }
 
 function sortScreenshots(list) {
@@ -63,17 +80,35 @@ function getClientRelativePath(absPath) {
     return path.join('../', path.relative(__dirname, absPath));
 }
 
-function replaceEChartsVersion(interceptedRequest, version) {
+function replaceEChartsVersion(interceptedRequest, source, version) {
     // TODO Extensions and maps
     if (interceptedRequest.url().endsWith('dist/echarts.js')) {
-        console.log('Use echarts version: ' + version);
+        console.log('Use echarts version: ' + source + ' ' + version);
         interceptedRequest.continue({
-            url: `${origin}/test/runTest/${getVersionDir(version)}/${getEChartsTestFileName()}`
+            url: `${origin}/test/runTest/${getVersionDir(source, version)}/${getEChartsTestFileName()}`
         });
     }
     else {
         interceptedRequest.continue();
     }
+}
+
+async function convertToWebP(filePath, lossless) {
+    const webpPath = filePath.replace(/\.png$/, '.webp');
+    return new Promise((resolve, reject) => {
+        execFile(cwebpBin, [
+            filePath,
+            '-o', webpPath,
+            ...(lossless ? ['-lossless'] : ['-q', 75])
+        ], (err) => {
+            if (err) {
+                reject(err);
+            }
+            else {
+                resolve(webpPath);
+            }
+        });
+    });
 }
 
 async function takeScreenshot(page, fullPage, fileUrl, desc, isExpected, minor) {
@@ -84,60 +119,57 @@ async function takeScreenshot(page, fullPage, fileUrl, desc, isExpected, minor) 
     if (minor) {
         screenshotName += '-' + minor;
     }
-    let screenshotPrefix = isExpected ? 'expected' : 'actual';
-    fse.ensureDirSync(path.join(__dirname, getScreenshotDir()));
-    let screenshotPath = path.join(__dirname, `${getScreenshotDir()}/${screenshotName}-${screenshotPrefix}.png`);
+    const screenshotPrefix = isExpected ? 'expected' : 'actual';
+    fse.ensureDirSync(getScreenshotDir());
+    const screenshotPath = path.join(getScreenshotDir(), `${screenshotName}-${screenshotPrefix}.png`);
     await page.screenshot({
         path: screenshotPath,
+        // https://github.com/puppeteer/puppeteer/issues/7043
+        // https://github.com/puppeteer/puppeteer/issues/6921#issuecomment-829586680
+        captureBeyondViewport: false,
         fullPage
     });
 
-    return {screenshotName, screenshotPath};
-}
-
-async function runActions(page, testOpt, isExpected, screenshots) {
-    let timeline = new Timeline(page);
-    let actions;
+    let webpScreenshotPath;
     try {
-        let actContent = fs.readFileSync(path.join(__dirname, 'actions', testOpt.name + '.json'));
-        actions = JSON.parse(actContent);
-    }
-    catch (e) {
-        // Can't find actions
-        return;
+        webpScreenshotPath = await convertToWebP(screenshotPath);
+    } catch (e) {
+        console.error('Failed to convert screenshot to webp', e);
     }
 
-    let playbackSpeed = +program.speed;
+    console.log('Screenshot: ', webpScreenshotPath || screenshotPath);
 
-    for (let action of actions) {
-        await page.evaluate((x, y) => {
-            window.scrollTo(x, y);
-        }, action.scrollX, action.scrollY);
-
-        let count = 0;
-        async function _innerTakeScreenshot() {
-            if (!program.save) {
-                return;
-            }
-            const desc = action.desc || action.name;
-            const {screenshotName, screenshotPath} = await takeScreenshot(page, false, testOpt.fileUrl, desc, isExpected, count++);
-            screenshots.push({screenshotName, desc, screenshotPath});
-        }
-        await timeline.runAction(action, _innerTakeScreenshot, playbackSpeed);
-
-        if (count === 0) {
-            await waitTime(200);
-            await _innerTakeScreenshot();
-        }
-
-        // const desc = action.desc || action.name;
-        // const {screenshotName, screenshotPath} = await takeScreenshot(page, false, testOpt.fileUrl, desc, version);
-        // screenshots.push({screenshotName, desc, screenshotPath});
-    }
-    timeline.stop();
+    return {
+        screenshotName,
+        screenshotPath: webpScreenshotPath || screenshotPath,
+        rawScreenshotPath: screenshotPath
+    };
 }
 
-async function runTestPage(browser, testOpt, version, runtimeCode, isExpected) {
+async function waitForNetworkIdle(page) {
+    let count = 0;
+    const started = () => (count = count + 1);
+    const ended = () => (count = count - 1);
+    page.on('request', started);
+    page.on('requestfailed', ended);
+    page.on('requestfinished', ended);
+    return async (timeout = 5000) => {
+        while (count > 0) {
+            await waitTime(100);
+            if ((timeout = timeout - 100) < 0) {
+                console.error('Timeout');
+            }
+        }
+        page.off('request', started);
+        page.off('requestfailed', ended);
+        page.off('requestfinished', ended);
+    };
+}
+
+/**
+ * @param {puppeteer.Browser} browser
+ */
+async function runTestPage(browser, testOpt, source, version, runtimeCode, isExpected) {
     const fileUrl = testOpt.fileUrl;
     const screenshots = [];
     const logs = [];
@@ -145,14 +177,96 @@ async function runTestPage(browser, testOpt, version, runtimeCode, isExpected) {
 
     const page = await browser.newPage();
     page.setRequestInterception(true);
-    page.on('request', request => replaceEChartsVersion(request, version));
+    page.on('request', request => replaceEChartsVersion(request, source, version));
+
+    async function pageScreenshot() {
+        if (!program.save) {
+            return;
+        }
+        // Final shot.
+        await page.mouse.move(0, 0);
+        const desc = 'Full Shot';
+        const {
+            screenshotName,
+            screenshotPath,
+            rawScreenshotPath
+        } = await takeScreenshot(page, true, fileUrl, desc, isExpected);
+        screenshots.push({
+            screenshotName,
+            desc,
+            screenshotPath,
+            rawScreenshotPath
+        });
+    }
+
+    let vstInited = false;
+
+    await page.exposeFunction('__VRT_INIT__', () => {
+        vstInited = true;
+    });
+    await page.exposeFunction('__VRT_MOUSE_MOVE__', async (x, y) =>  {
+        await page.mouse.move(x, y);
+    });
+    await page.exposeFunction('__VRT_MOUSE_DOWN__', async () =>  {
+        await page.mouse.down();
+    });
+    await page.exposeFunction('__VRT_MOUSE_UP__', async () =>  {
+        await page.mouse.up();
+    });
+    await page.exposeFunction('__VRT_LOAD_ERROR__', async (err) =>  {
+        errors.push(err);
+    });
+    // await page.exposeFunction('__VRT_WAIT_FOR_NETWORK_IDLE__', async () =>  {
+    //     await waitForNetworkIdle();
+    // });
+
+    // TODO should await exposeFunction here
+    const waitForScreenshot = new Promise((resolve) => {
+        page.exposeFunction('__VRT_FULL_SCREENSHOT__', async () =>  {
+            await pageScreenshot();
+            resolve();
+        });
+    });
+
+    const waitForActionFinishManually = new Promise((resolve) => {
+        page.exposeFunction('__VRT_FINISH_ACTIONS__', async () =>  {
+            resolve();
+        });
+    });
+
+    page.exposeFunction('__VRT_LOG_ERRORS__', (err) =>  {
+        errors.push(err);
+    });
+
+    let actionScreenshotCount = {};
+
+    await page.exposeFunction('__VRT_ACTION_SCREENSHOT__', async (action) =>  {
+        if (!program.save) {
+            return;
+        }
+        const desc = action.desc || action.name;
+        actionScreenshotCount[action.name] = actionScreenshotCount[action.name] || 0;
+        const {
+            screenshotName,
+            screenshotPath,
+            rawScreenshotPath
+        } = await takeScreenshot(page, false, testOpt.fileUrl, desc, isExpected, actionScreenshotCount[action.name]++);
+        screenshots.push({
+            screenshotName,
+            desc,
+            screenshotPath,
+            rawScreenshotPath
+        });
+    });
 
     await page.evaluateOnNewDocument(runtimeCode);
 
     page.on('console', msg => {
+        // console.log('Page Log: ', msg.text());
         logs.push(msg.text());
     });
     page.on('pageerror', error => {
+        console.error('Page Error: ', error.toString());
         errors.push(error.toString());
     });
     page.on('dialog', async dialog => {
@@ -160,22 +274,46 @@ async function runTestPage(browser, testOpt, version, runtimeCode, isExpected) {
     });
 
     try {
-        await page.setViewport({width: 800, height: 600});
-        await page.goto(`${origin}/test/${fileUrl}?__RENDERER__=${program.renderer}`, {
+        await page.setViewport({
+            width: 800,
+            height: 600
+        });
+        await page.goto(`${origin}/test/${fileUrl}?__RENDERER__=${program.renderer}&__COARSE__POINTER__=${program.useCoarsePointer}`, {
             waitUntil: 'networkidle2',
-            timeout: 10000
+            timeout: 10000,
+            // timeout: 0
         });
 
-        await waitTime(500);  // Wait for animation or something else. Pending
-        // Final shot.
-        await page.mouse.move(0, 0);
-        if (program.save) {
-            let desc = 'Full Shot';
-            const {screenshotName, screenshotPath} = await takeScreenshot(page, true, fileUrl, desc, isExpected);
-            screenshots.push({screenshotName, desc, screenshotPath});
+        if (!vstInited) {    // Not using simpleRequire in the test
+            console.log(`Automatically started in ${testNameFromFile(fileUrl)}`);
+            await page.evaluate(() => {
+                __VRT_START__();
+            });
         }
+        // Wait do screenshot after inited
+        await waitForScreenshot;
 
-        await runActions(page, testOpt, isExpected, screenshots);
+        let actions = [];
+        try {
+            let actContent = await fse.readFile(path.join(__dirname, 'actions', testOpt.name + '.json'));
+            actions = JSON.parse(actContent);
+        }
+        catch (e) {
+            // console.log(e);
+        }
+        if (actions.length > 0) {
+            try {
+                page.evaluate((actions) => {
+                    __VRT_RUN_ACTIONS__(actions);
+                }, actions);
+            }
+            catch (e) {
+                errors.push(e.toString());
+            }
+            // We need to use the actions finish signal if there is reload happens in the page.
+            // Because the original __VRT_RUN_ACTIONS__ not exists anymore.
+            await waitForActionFinishManually;
+        }
     }
     catch(e) {
         console.error(e);
@@ -190,25 +328,24 @@ async function runTestPage(browser, testOpt, version, runtimeCode, isExpected) {
     };
 }
 
-async function writePNG(diffPNG, diffPath) {
-    return new Promise(resolve => {
-        let writer = fs.createWriteStream(diffPath);
+function writePNG(diffPNG, diffPath) {
+    return new Promise((resolve, reject) => {
+        const writer = fs.createWriteStream(diffPath);
         diffPNG.pack().pipe(writer);
-        writer.on('finish', () => {resolve();});
+        writer.on('finish', resolve);
+        writer.on('error', reject);
     });
 };
 
-async function runTest(browser, testOpt, runtimeCode, expectedVersion, actualVersion) {
-    if (program.renderer === 'svg' && testOpt.ignoreSVG) {
-        console.log(testOpt.name + ' don\'t support svg testing.');
-        return;
-    }
-
+/**
+ * @param {puppeteer.Browser} browser
+ */
+async function runTest(browser, testOpt, runtimeCode, expectedSource, expectedVersion, actualSource, actualVersion) {
     if (program.save) {
         testOpt.status === 'running';
 
-        const expectedResult = await runTestPage(browser, testOpt, expectedVersion, runtimeCode, true);
-        const actualResult = await runTestPage(browser, testOpt, actualVersion, runtimeCode, false);
+        const expectedResult = await runTestPage(browser, testOpt, expectedSource, expectedVersion, runtimeCode, true);
+        const actualResult = await runTestPage(browser, testOpt, actualSource, actualVersion, runtimeCode, false);
 
         // sortScreenshots(expectedResult.screenshots);
         // sortScreenshots(actualResult.screenshots);
@@ -216,31 +353,49 @@ async function runTest(browser, testOpt, runtimeCode, expectedVersion, actualVer
         const screenshots = [];
         let idx = 0;
         for (let shot of expectedResult.screenshots) {
-            let expected = shot;
-            let actual = actualResult.screenshots[idx++];
-            let result = {
+            const expected = shot;
+            const actual = actualResult.screenshots[idx++];
+            const result = {
                 actual: getClientRelativePath(actual.screenshotPath),
                 expected: getClientRelativePath(expected.screenshotPath),
                 name: actual.screenshotName,
                 desc: actual.desc
             };
             try {
-                let {diffRatio, diffPNG} = await compareScreenshot(
-                    expected.screenshotPath,
-                    actual.screenshotPath
+                const {diffRatio, diffPNG} = await compareScreenshot(
+                    expected.rawScreenshotPath,
+                    actual.rawScreenshotPath
                 );
 
-                let diffPath = `${path.resolve(__dirname, getScreenshotDir())}/${shot.screenshotName}-diff.png`;
+                const diffPath = `${getScreenshotDir()}/${shot.screenshotName}-diff.png`;
                 await writePNG(diffPNG, diffPath);
 
-                result.diff = getClientRelativePath(diffPath);
+                let diffWebpPath;
+                try {
+                    diffWebpPath = await convertToWebP(diffPath);
+                } catch (e) {
+                    console.error('Failed to convert diff png to webp', e);
+                }
+
+                result.diff = getClientRelativePath(diffWebpPath || diffPath);
                 result.diffRatio = diffRatio;
+
+                // Remove png files
+                try {
+                    await Promise.all([
+                        fse.unlink(actual.rawScreenshotPath),
+                        fse.unlink(expected.rawScreenshotPath),
+                        diffWebpPath && fse.unlink(diffPath)
+                    ]);
+                }
+                catch (e) {}
             }
             catch(e) {
                 result.diff = '';
                 result.diffRatio = 1;
                 console.log(e);
             }
+
             screenshots.push(result);
         }
 
@@ -253,6 +408,7 @@ async function runTest(browser, testOpt, runtimeCode, expectedVersion, actualVer
         testOpt.actualVersion = actualVersion;
         testOpt.expectedVersion = expectedVersion;
         testOpt.useSVG = program.renderer === 'svg';
+        testOpt.useCoarsePointer = program.useCoarsePointer;
         testOpt.lastRun = Date.now();
     }
     else {
@@ -269,28 +425,43 @@ async function runTests(pendingTests) {
     // TODO Not hardcoded.
     // let runtimeCode = fs.readFileSync(path.join(__dirname, 'tmp/testRuntime.js'), 'utf-8');
     let runtimeCode = await buildRuntimeCode();
-    runtimeCode = `window.__TEST_PLAYBACK_SPEED__ = ${program.speed || 1};\n${runtimeCode}`;
+    runtimeCode = `window.__VRT_PLAYBACK_SPEED__ = ${program.speed || 1};\n${runtimeCode}`;
+
+    process.on('exit', () => {
+        browser.close();
+    });
+
+    async function eachTask(testOpt) {
+        console.log(`Running test: ${testOpt.name}, renderer: ${program.renderer}, useCoarsePointer: ${program.useCoarsePointer}`);
+        try {
+            await runTest(browser, testOpt, runtimeCode, program.expectedSource, program.expected, program.actualSource, program.actual);
+        }
+        catch (e) {
+            // Restore status
+            testOpt.status = 'unsettled';
+            console.error(e);
+        }
+
+        if (program.save) {
+            process.send(testOpt);
+        }
+    }
+
+    // console.log('Running threads: ', program.threads);
+    // await runTasks(pendingTests, async (testOpt) => {
+    //     await eachTask(testOpt);
+    // }, program.threads);
+
 
     try {
         for (let testOpt of pendingTests) {
-            console.log(`Running test: ${testOpt.name}, renderer: ${program.renderer}`);
-            try {
-                await runTest(browser, testOpt, runtimeCode, program.expected, program.actual);
-            }
-            catch (e) {
-                // Restore status
-                testOpt.status = 'unsettled';
-                console.log(e);
-            }
-
-            if (program.save) {
-                process.send(testOpt);
-            }
+            await eachTask(testOpt);
         }
     }
     catch(e) {
-        console.log(e);
+        console.error(e);
     }
+
 
     await browser.close();
 }
@@ -307,3 +478,4 @@ runTests(program.tests.split(',').map(testName => {
         status: 'pending'
     };
 }));
+

@@ -26,31 +26,45 @@ import {
     OptionDataItemObject,
     SeriesSamplingOptionMixin,
     SeriesLabelOption,
-    SeriesEncodeOptionMixin
+    SeriesEncodeOptionMixin,
+    DefaultStatesMixinEmphasis,
+    CallbackDataParams
 } from '../../util/types';
 import type Cartesian2D from '../../coord/cartesian/Cartesian2D';
-import createListFromArray from '../helper/createListFromArray';
+import createSeriesData from '../helper/createSeriesData';
 import type Polar from '../../coord/polar/Polar';
 import { inheritDefaultOption } from '../../util/component';
-import List from '../../data/List';
+import SeriesData from '../../data/SeriesData';
 import { BrushCommonSelectorsForSeries } from '../../component/brush/selector';
 
+export type PolarBarLabelPosition = SeriesLabelOption['position']
+    | 'start' | 'insideStart' | 'middle' | 'end' | 'insideEnd';
 
-export interface BarStateOption {
-    itemStyle?: BarItemStyleOption
-    label?: SeriesLabelOption
+export type BarSeriesLabelOption = Omit<SeriesLabelOption, 'position'>
+    & {position?: PolarBarLabelPosition | 'outside'};
+
+export interface BarStateOption<TCbParams = never> {
+    itemStyle?: BarItemStyleOption<TCbParams>
+    label?: BarSeriesLabelOption
 }
 
-export interface BarItemStyleOption extends ItemStyleOption {
-    // Border radius is not supported for bar on polar
-    borderRadius?: number | number[]
+interface BarStatesMixin {
+    emphasis?: DefaultStatesMixinEmphasis
 }
-export interface BarDataItemOption extends BarStateOption, StatesOptionMixin<BarStateOption>,
+
+export interface BarItemStyleOption<TCbParams = never> extends ItemStyleOption<TCbParams> {
+    // for polar bars, this is used for sector's cornerRadius
+    borderRadius?: (number | string)[] | number | string
+}
+export interface BarDataItemOption extends BarStateOption,
+    StatesOptionMixin<BarStateOption, BarStatesMixin>,
     OptionDataItemObject<OptionDataValue> {
     cursor?: string
 }
 
-export interface BarSeriesOption extends BaseBarSeriesOption<BarStateOption>, BarStateOption,
+export interface BarSeriesOption
+    extends BaseBarSeriesOption<BarStateOption<CallbackDataParams>, BarStatesMixin>,
+    BarStateOption<CallbackDataParams>,
     SeriesStackOptionMixin, SeriesSamplingOptionMixin, SeriesEncodeOptionMixin {
 
     type?: 'bar'
@@ -66,6 +80,8 @@ export interface BarSeriesOption extends BaseBarSeriesOption<BarStateOption>, Ba
     roundCap?: boolean
 
     showBackground?: boolean
+
+    startValue?: number
 
     backgroundStyle?: ItemStyleOption & {
         borderRadius?: number | number[]
@@ -84,8 +100,8 @@ class BarSeriesModel extends BaseBarSeriesModel<BarSeriesOption> {
 
     coordinateSystem: Cartesian2D | Polar;
 
-    getInitialData(): List {
-        return createListFromArray(this.getSource(), this, {
+    getInitialData(): SeriesData {
+        return createSeriesData(null, this, {
             useEncodeDefaulter: true,
             createInvertedIndices: !!this.get('realtimeSort', true) || null
         });
@@ -114,7 +130,7 @@ class BarSeriesModel extends BaseBarSeriesModel<BarSeriesOption> {
         return progressiveThreshold;
     }
 
-    brushSelector(dataIndex: number, data: List, selectors: BrushCommonSelectorsForSeries): boolean {
+    brushSelector(dataIndex: number, data: SeriesData, selectors: BrushCommonSelectorsForSeries): boolean {
         return selectors.rect(data.getItemLayout(dataIndex));
     }
 
@@ -146,7 +162,7 @@ class BarSeriesModel extends BaseBarSeriesModel<BarSeriesOption> {
         },
 
         realtimeSort: false
-    });
+    } as BarSeriesOption);
 
 }
 

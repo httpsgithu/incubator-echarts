@@ -24,7 +24,7 @@ import { createTextStyle } from '../../label/labelStyle';
 import * as layout from '../../util/layout';
 import TimelineView from './TimelineView';
 import TimelineAxis from './TimelineAxis';
-import {createSymbol} from '../../util/symbol';
+import {createSymbol, normalizeSymbolOffset, normalizeSymbolSize} from '../../util/symbol';
 import * as numberUtil from '../../util/number';
 import GlobalModel from '../../model/Global';
 import ExtensionAPI from '../../core/ExtensionAPI';
@@ -351,7 +351,7 @@ class SliderTimelineView extends TimelineView {
 
         const dataExtent = data.getDataExtent('value');
         scale.setExtent(dataExtent[0], dataExtent[1]);
-        scale.niceTicks();
+        scale.calcNiceTicks();
 
         const axis = new TimelineAxis('value', scale, layoutInfo.axisExtent as [number, number], axisType);
         axis.model = timelineModel;
@@ -420,7 +420,7 @@ class SliderTimelineView extends TimelineView {
 
         this._tickSymbols = [];
 
-        // The value is dataIndex, see the costomized scale.
+        // The value is dataIndex, see the customized scale.
         each(ticks, (tick: ScaleTick) => {
             const tickCoord = axis.dataToCoord(tick.value);
             const itemModel = data.getItemModel<TimelineDataItemOption>(tick.value);
@@ -470,7 +470,7 @@ class SliderTimelineView extends TimelineView {
         this._tickLabels = [];
 
         each(labels, (labelItem) => {
-            // The tickValue is dataIndex, see the costomized scale.
+            // The tickValue is dataIndex, see the customized scale.
             const dataIndex = labelItem.tickValue;
 
             const itemModel = data.getItemModel<TimelineDataItemOption>(dataIndex);
@@ -626,8 +626,11 @@ class SliderTimelineView extends TimelineView {
         this._currentPointer.x = toCoord;
         this._currentPointer.markRedraw();
 
-        this._progressLine.shape.x2 = toCoord;
-        this._progressLine.dirty();
+        const progressLine = this._progressLine;
+        if (progressLine) {
+            progressLine.shape.x2 = toCoord;
+            progressLine.dirty();
+        }
 
         const targetDataIndex = this._findNearestTick(toCoord);
         const timelineModel = this.model;
@@ -823,20 +826,15 @@ function giveSymbol(
         z2: 100
     }, opt, true);
 
-    let symbolSize = hostModel.get('symbolSize');
-    symbolSize = symbolSize instanceof Array
-        ? symbolSize.slice()
-        : [+symbolSize, +symbolSize];
+    const symbolSize = normalizeSymbolSize(hostModel.get('symbolSize'));
 
     opt.scaleX = symbolSize[0] / 2;
     opt.scaleY = symbolSize[1] / 2;
 
-    const symbolOffset = hostModel.get('symbolOffset');
+    const symbolOffset = normalizeSymbolOffset(hostModel.get('symbolOffset'), symbolSize);
     if (symbolOffset) {
-        opt.x = opt.x || 0;
-        opt.y = opt.y || 0;
-        opt.x += numberUtil.parsePercent(symbolOffset[0], symbolSize[0]);
-        opt.y += numberUtil.parsePercent(symbolOffset[1], symbolSize[1]);
+        opt.x = (opt.x || 0) + symbolOffset[0];
+        opt.y = (opt.y || 0) + symbolOffset[1];
     }
 
     const symbolRotate = hostModel.get('symbolRotate');

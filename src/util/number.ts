@@ -18,7 +18,7 @@
 */
 
 /*
-* A third-party license is embeded for some of the code in this file:
+* A third-party license is embedded for some of the code in this file:
 * The method "quantile" was copied from "d3.js".
 * (See more details in the comment of the method below.)
 * The use of the source code of this file is also subject to the terms
@@ -29,6 +29,9 @@
 import * as zrUtil from 'zrender/src/core/util';
 
 const RADIAN_EPSILON = 1e-4;
+// Although chrome already enlarge this number to 100 for `toFixed`, but
+// we sill follow the spec for compatibility.
+const ROUND_SUPPORTED_PRECISION_MAX = 20;
 
 function _trim(str: string): string {
     return str.replace(/^\s+|\s+$/g, '');
@@ -47,13 +50,18 @@ export function linearMap(
     range: number[],
     clamp?: boolean
 ): number {
-    const subDomain = domain[1] - domain[0];
-    const subRange = range[1] - range[0];
+    const d0 = domain[0];
+    const d1 = domain[1];
+    const r0 = range[0];
+    const r1 = range[1];
+
+    const subDomain = d1 - d0;
+    const subRange = r1 - r0;
 
     if (subDomain === 0) {
         return subRange === 0
-            ? range[0]
-            : (range[0] + range[1]) / 2;
+            ? r0
+            : (r0 + r1) / 2;
     }
 
     // Avoid accuracy problem in edge, such as
@@ -63,32 +71,32 @@ export function linearMap(
     // is a hotspot.
     if (clamp) {
         if (subDomain > 0) {
-            if (val <= domain[0]) {
-                return range[0];
+            if (val <= d0) {
+                return r0;
             }
-            else if (val >= domain[1]) {
-                return range[1];
+            else if (val >= d1) {
+                return r1;
             }
         }
         else {
-            if (val >= domain[0]) {
-                return range[0];
+            if (val >= d0) {
+                return r0;
             }
-            else if (val <= domain[1]) {
-                return range[1];
+            else if (val <= d1) {
+                return r1;
             }
         }
     }
     else {
-        if (val === domain[0]) {
-            return range[0];
+        if (val === d0) {
+            return r0;
         }
-        if (val === domain[1]) {
-            return range[1];
+        if (val === d1) {
+            return r1;
         }
     }
 
-    return (val - domain[0]) / subDomain * subRange + range[0];
+    return (val - d0) / subDomain * subRange + r0;
 }
 
 /**
@@ -110,7 +118,7 @@ export function parsePercent(percent: number | string, all: number): number {
             percent = '100%';
             break;
     }
-    if (typeof percent === 'string') {
+    if (zrUtil.isString(percent)) {
         if (_trim(percent).match(/%$/)) {
             return parseFloat(percent) / 100 * all;
         }
@@ -133,7 +141,8 @@ export function round(x: number | string, precision?: number, returnStr?: boolea
         precision = 10;
     }
     // Avoid range error
-    precision = Math.min(Math.max(0, precision), 20);
+    precision = Math.min(Math.max(0, precision), ROUND_SUPPORTED_PRECISION_MAX);
+    // PENDING: 1.005.toFixed(2) is '1.00' rather than '1.01'
     x = (+x).toFixed(precision);
     return (returnStr ? x : +x);
 }
@@ -150,42 +159,49 @@ export function asc<T extends number[]>(arr: T): T {
 }
 
 /**
- * Get precision
+ * Get precision.
  */
 export function getPrecision(val: string | number): number {
     val = +val;
     if (isNaN(val)) {
         return 0;
     }
+
     // It is much faster than methods converting number to string as follows
     //      let tmp = val.toString();
     //      return tmp.length - 1 - tmp.indexOf('.');
     // especially when precision is low
-    let e = 1;
-    let count = 0;
-    while (Math.round(val * e) / e !== val) {
-        e *= 10;
-        count++;
+    // Notice:
+    // (1) If the loop count is over about 20, it is slower than `getPrecisionSafe`.
+    //     (see https://jsbench.me/2vkpcekkvw/1)
+    // (2) If the val is less than for example 1e-15, the result may be incorrect.
+    //     (see test/ut/spec/util/number.test.ts `getPrecision_equal_random`)
+    if (val > 1e-14) {
+        let e = 1;
+        for (let i = 0; i < 15; i++, e *= 10) {
+            if (Math.round(val * e) / e === val) {
+                return i;
+            }
+        }
     }
-    return count;
+
+    return getPrecisionSafe(val);
 }
 
 /**
  * Get precision with slow but safe method
  */
 export function getPrecisionSafe(val: string | number): number {
-    const str = val.toString();
+    // toLowerCase for: '3.4E-12'
+    const str = val.toString().toLowerCase();
 
     // Consider scientific notation: '3.4e-12' '3.4e+12'
     const eIndex = str.indexOf('e');
-    if (eIndex > 0) {
-        const precision = +str.slice(eIndex + 1);
-        return precision < 0 ? -precision : 0;
-    }
-    else {
-        const dotIndex = str.indexOf('.');
-        return dotIndex < 0 ? 0 : str.length - 1 - dotIndex;
-    }
+    const exp = eIndex > 0 ? +str.slice(eIndex + 1) : 0;
+    const significandPartLen = eIndex > 0 ? eIndex : str.length;
+    const dotIndex = str.indexOf('.');
+    const decimalPartLen = dotIndex < 0 ? 0 : significandPartLen - 1 - dotIndex;
+    return Math.max(0, decimalPartLen - exp);
 }
 
 /**
@@ -204,7 +220,7 @@ export function getPixelPrecision(dataExtent: [number, number], pixelExtent: [nu
 /**
  * Get a data of given precision, assuring the sum of percentages
  * in valueList is 1.
- * The largest remainer method is used.
+ * The largest remainder method is used.
  * https://en.wikipedia.org/wiki/Largest_remainder_method
  *
  * @param valueList a list of all data
@@ -217,11 +233,27 @@ export function getPercentWithPrecision(valueList: number[], idx: number, precis
         return 0;
     }
 
+    const seats = getPercentSeats(valueList, precision);
+
+    return seats[idx] || 0;
+}
+
+/**
+ * Get a data of given precision, assuring the sum of percentages
+ * in valueList is 1.
+ * The largest remainder method is used.
+ * https://en.wikipedia.org/wiki/Largest_remainder_method
+ *
+ * @param valueList a list of all data
+ * @param precision integer number showing digits of precision
+ * @return {Array<number>}
+ */
+export function getPercentSeats(valueList: number[], precision: number): number[] {
     const sum = zrUtil.reduce(valueList, function (acc, val) {
         return acc + (isNaN(val) ? 0 : val);
     }, 0);
     if (sum === 0) {
-        return 0;
+        return [];
     }
 
     const digits = Math.pow(10, precision);
@@ -259,8 +291,23 @@ export function getPercentWithPrecision(valueList: number[], idx: number, precis
         remainder[maxId] = 0;
         ++currentSum;
     }
+    return zrUtil.map(seats, function (seat) {
+        return seat / digits;
+    });
+}
 
-    return seats[idx] / digits;
+/**
+ * Solve the floating point adding problem like 0.1 + 0.2 === 0.30000000000000004
+ * See <http://0.30000000000000004.com/>
+ */
+export function addSafe(val0: number, val1: number): number {
+    const maxPrecision = Math.max(getPrecision(val0), getPrecision(val1));
+    // const multiplier = Math.pow(10, maxPrecision);
+    // return (Math.round(val0 * multiplier) + Math.round(val1 * multiplier)) / multiplier;
+    const sum = val0 + val1;
+    // // PENDING: support more?
+    return maxPrecision > ROUND_SUPPORTED_PRECISION_MAX
+        ? sum : round(sum, maxPrecision);
 }
 
 // Number.MAX_SAFE_INTEGER, ie do not support.
@@ -295,7 +342,7 @@ const TIME_REG = /^(?:(\d{4})(?:[-\/](\d{1,2})(?:[-\/](\d{1,2})(?:[T ](\d{1,2})(
  *     + time zone: '2012-03-01T12:22:33Z', '2012-03-01T12:22:33+8000', '2012-03-01T12:22:33-05:00',
  *     all of which will be treated as local time if time zone is not specified
  *     (see <https://momentjs.com/>).
- *   + Or other string format, including (all of which will be treated as loacal time):
+ *   + Or other string format, including (all of which will be treated as local time):
  *     '2012', '2012-3-1', '2012/3/1', '2012/03/01',
  *     '2009/6/12 2:00', '2009/6/12 2:05:08', '2009/6/12 2:05:08.123'
  *   + a timestamp, which represent a time in UTC.
@@ -305,7 +352,7 @@ export function parseDate(value: unknown): Date {
     if (value instanceof Date) {
         return value;
     }
-    else if (typeof value === 'string') {
+    else if (zrUtil.isString(value)) {
         // Different browsers parse date in different way, so we parse it manually.
         // Some other issues:
         // new Date('1970-01-01') is UTC,
@@ -318,7 +365,7 @@ export function parseDate(value: unknown): Date {
             return new Date(NaN);
         }
 
-        // Use local time when no timezone offset specifed.
+        // Use local time when no timezone offset is specified.
         if (!match[8]) {
             // match[n] can only be string or undefined.
             // But take care of '12' + 1 => '121'.
@@ -329,7 +376,7 @@ export function parseDate(value: unknown): Date {
                 +match[4] || 0,
                 +(match[5] || 0),
                 +match[6] || 0,
-                +match[7] || 0
+                match[7] ? +match[7].substring(0, 3) : 0
             );
         }
         // Timezoneoffset of Javascript Date has considered DST (Daylight Saving Time,
@@ -351,7 +398,7 @@ export function parseDate(value: unknown): Date {
                 hour,
                 +(match[5] || 0),
                 +match[6] || 0,
-                +match[7] || 0
+                match[7] ? +match[7].substring(0, 3) : 0
             ));
         }
     }
@@ -536,7 +583,7 @@ export function reformIntervals(list: IntervalItem[]): IntervalItem[] {
 }
 
 /**
- * [Numberic is defined as]:
+ * [Numeric is defined as]:
  *     `parseFloat(val) == val`
  * For example:
  * numeric:
@@ -555,7 +602,7 @@ export function numericToNumber(val: unknown): number {
     const valFloat = parseFloat(val as string);
     return (
         valFloat == val // eslint-disable-line eqeqeq
-        && (valFloat !== 0 || typeof val !== 'string' || val.indexOf('x') <= 0) // For case ' 0x0 '.
+        && (valFloat !== 0 || !zrUtil.isString(val) || val.indexOf('x') <= 0) // For case ' 0x0 '.
     ) ? valFloat : NaN;
 }
 
@@ -576,7 +623,7 @@ export function getRandomIdBase(): number {
 }
 
 /**
- * Get the greatest common dividor
+ * Get the greatest common divisor.
  *
  * @param {number} a one number
  * @param {number} b the other number
@@ -589,7 +636,7 @@ export function getGreatestCommonDividor(a: number, b: number): number {
 }
 
 /**
- * Get the least common multiple
+ * Get the least common multiple.
  *
  * @param {number} a one number
  * @param {number} b the other number

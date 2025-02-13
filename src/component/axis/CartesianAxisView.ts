@@ -27,8 +27,8 @@ import GlobalModel from '../../model/Global';
 import ExtensionAPI from '../../core/ExtensionAPI';
 import CartesianAxisModel from '../../coord/cartesian/AxisModel';
 import GridModel from '../../coord/cartesian/GridModel';
-import ComponentView from '../../view/Component';
 import { Payload } from '../../util/types';
+import { isIntervalOrLogScale } from '../../scale/helper';
 
 const axisBuilderAttrs = [
     'axisLine', 'axisTickLabel', 'axisName'
@@ -70,8 +70,7 @@ class CartesianAxisView extends AxisView {
             handleAutoShown(elementType) {
                 const cartesians = gridModel.coordinateSystem.getCartesians();
                 for (let i = 0; i < cartesians.length; i++) {
-                    const otherAxisType = cartesians[i].getOtherAxis(axisModel.axis).type;
-                    if (otherAxisType === 'value' || otherAxisType === 'log') {
+                    if (isIntervalOrLogScale(cartesians[i].getOtherAxis(axisModel.axis).scale)) {
                         // Still show axis tick or axisLine if other axis is value / log
                         return true;
                     }
@@ -91,7 +90,14 @@ class CartesianAxisView extends AxisView {
             }
         }, this);
 
-        graphic.groupTransition(oldAxisGroup, this._axisGroup, axisModel);
+        // THIS is a special case for bar racing chart.
+        // Update the axis label from the natural initial layout to
+        // sorted layout should has no animation.
+        const isInitialSortFromBarRacing = payload && payload.type === 'changeAxisOrder' && payload.isInitSort;
+
+        if (!isInitialSortFromBarRacing) {
+            graphic.groupTransition(oldAxisGroup, this._axisGroup, axisModel);
+        }
 
         super.render(axisModel, ecModel, api, payload);
     }
@@ -117,6 +123,8 @@ const axisElementBuilders: Record<typeof selfBuilderAttrs[number], AxisElementBu
         const splitLineModel = axisModel.getModel('splitLine');
         const lineStyleModel = splitLineModel.getModel('lineStyle');
         let lineColors = lineStyleModel.get('color');
+        const showMinLine = splitLineModel.get('showMinLine') !== false;
+        const showMaxLine = splitLineModel.get('showMaxLine') !== false;
 
         lineColors = zrUtil.isArray(lineColors) ? lineColors : [lineColors];
 
@@ -136,6 +144,12 @@ const axisElementBuilders: Record<typeof selfBuilderAttrs[number], AxisElementBu
         for (let i = 0; i < ticksCoords.length; i++) {
             const tickCoord = axis.toGlobalCoord(ticksCoords[i].coord);
 
+            if ((i === 0 && !showMinLine) || (i === ticksCoords.length - 1 && !showMaxLine)) {
+                continue;
+            }
+
+            const tickValue = ticksCoords[i].tickValue;
+
             if (isHorizontal) {
                 p1[0] = tickCoord;
                 p1[1] = gridRect.y;
@@ -150,10 +164,8 @@ const axisElementBuilders: Record<typeof selfBuilderAttrs[number], AxisElementBu
             }
 
             const colorIndex = (lineCount++) % lineColors.length;
-            const tickValue = ticksCoords[i].tickValue;
-            axisGroup.add(new graphic.Line({
-                anid: tickValue != null ? 'line_' + ticksCoords[i].tickValue : null,
-                subPixelOptimize: true,
+            const line = new graphic.Line({
+                anid: tickValue != null ? 'line_' + tickValue : null,
                 autoBatch: true,
                 shape: {
                     x1: p1[0],
@@ -165,7 +177,9 @@ const axisElementBuilders: Record<typeof selfBuilderAttrs[number], AxisElementBu
                     stroke: lineColors[colorIndex]
                 }, lineStyle),
                 silent: true
-            }));
+            });
+            graphic.subPixelOptimizeLine(line.shape, lineStyle.lineWidth);
+            axisGroup.add(line);
         }
     },
 
@@ -187,7 +201,6 @@ const axisElementBuilders: Record<typeof selfBuilderAttrs[number], AxisElementBu
 
         const lineStyle = lineStyleModel.getLineStyle();
 
-
         for (let i = 0; i < minorTicksCoords.length; i++) {
             for (let k = 0; k < minorTicksCoords[i].length; k++) {
                 const tickCoord = axis.toGlobalCoord(minorTicksCoords[i][k].coord);
@@ -205,9 +218,8 @@ const axisElementBuilders: Record<typeof selfBuilderAttrs[number], AxisElementBu
                     p2[1] = tickCoord;
                 }
 
-                axisGroup.add(new graphic.Line({
+                const line = new graphic.Line({
                     anid: 'minor_line_' + minorTicksCoords[i][k].tickValue,
-                    subPixelOptimize: true,
                     autoBatch: true,
                     shape: {
                         x1: p1[0],
@@ -217,7 +229,9 @@ const axisElementBuilders: Record<typeof selfBuilderAttrs[number], AxisElementBu
                     },
                     style: lineStyle,
                     silent: true
-                }));
+                });
+                graphic.subPixelOptimizeLine(line.shape, lineStyle.lineWidth);
+                axisGroup.add(line);
             }
         }
     },
