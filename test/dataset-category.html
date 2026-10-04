@@ -22,7 +22,7 @@ under the License.
 <html>
     <head>
         <meta charset="utf-8">
-        <script src="lib/esl.js"></script>
+        <script src="lib/simpleRequire.js"></script>
         <script src="lib/config.js"></script>
         <script src="lib/testHelper.js"></script>
         <meta name="viewport" content="width=device-width, initial-scale=1" />
@@ -47,6 +47,7 @@ under the License.
         <div id="category-no-encode-has-axis-data"></div>
         <div id="category"></div>
         <div id="two-value-axes"></div>
+        <div id="object-source"></div>
         <div id="empty-data"></div>
         <div id="empty-source"></div>
         <div id="dynamic-category"></div>
@@ -671,7 +672,45 @@ under the License.
 
 
 
+        <script>
+            require([
+                'echarts'
+            ], function (echarts) {
 
+                var option = {
+                    "dataset": {
+                        "source": [
+                            {
+                                "elevation_above_sea_level": 4,
+                                "length": 1,
+                                "width": 4
+                            }
+                        ]
+                    },
+
+                    "xAxis": {
+                        "type": "value"
+                    },
+                    "yAxis": {
+                        "type": "value"
+                    },
+                    "series": [
+                        {
+                            "type": "line",
+                            "encode": {
+                                "x": "length",
+                                "y": "elevation_above_sea_level"
+                            }
+                        }
+                    ]
+                };
+
+                testHelper.create(echarts, 'object-source', {
+                    title: "object source that contains 'length' won't break render",
+                    option: option
+                });
+            });
+        </script>
 
 
 

@@ -22,7 +22,7 @@ under the License.
 <html>
     <head>
         <meta charset="utf-8">
-        <script src="lib/esl.js"></script>
+        <script src="lib/simpleRequire.js"></script>
         <script src="lib/config.js"></script>
         <script src="lib/facePrint.js"></script>
         <meta name="viewport" content="width=device-width, initial-scale=1" />
@@ -57,8 +57,8 @@ under the License.
         <style>
         </style>
         <div id="buttons">
-            <button id="switchAbove" onclick="addAbove();">Remove Above</botton>
-            <button id="switchCSSPosition" onclick="switchCSSPosition();">To Fixed</botton>
+            <button id="switchAbove" onclick="addAbove();">Remove Above</button>
+            <button id="switchCSSPosition" onclick="switchCSSPosition();">To Fixed</button>
         </div>
         <div id="above">Pinch grid, zoom should be normal.</div>
         <div id="main-block" style="position:relative"><div id="main" style="position:relative"></div></div>
@@ -106,12 +106,6 @@ under the License.
 
             require([
                 'echarts'
-                // 'echarts/chart/line',
-                // 'echarts/chart/bar',
-                // 'echarts/component/legend',
-                // 'echarts/component/grid',
-                // 'echarts/component/tooltip',
-                // 'echarts/component/dataZoom'
             ], function (ec) {
 
                 echarts = ec;

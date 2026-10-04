@@ -18,7 +18,6 @@
 */
 
 import {Dictionary} from 'zrender/src/core/types';
-import {isArray} from 'zrender/src/core/util';
 import {makeInner, normalizeToArray} from '../../util/model';
 import Model from '../Model';
 import {ZRColor, PaletteOptionMixin, DecalObject, AriaOptionMixin} from '../../util/types';
@@ -48,7 +47,7 @@ class PaletteMixin<T extends PaletteOptionMixin = PaletteOptionMixin> {
     getColorFromPalette(
         this: PaletteMixin<T>,
         name: string,
-        scope?: any,
+        scope?: object,
         requestNum?: number
     ): ZRColor {
         const defaultPalette = normalizeToArray(this.get('color', true));
@@ -64,7 +63,7 @@ class PaletteMixin<T extends PaletteOptionMixin = PaletteOptionMixin> {
 export function getDecalFromPalette(
     ecModel: GlobalModel,
     name: string,
-    scope?: any,
+    scope: object,
     requestNum?: number
 ): DecalObject {
     const defaultDecals = normalizeToArray((ecModel as Model<AriaOptionMixin>).get(['aria', 'decal', 'decals']));
@@ -97,8 +96,8 @@ function getFromPalette<T>(
     defaultPalette: T[],
     layeredPalette: T[][],
     name: string,
-    scope?: any,
-    requestNum?: number
+    scope: any,
+    requestNum: number
 ): T {
     scope = scope || that;
     const scopeFields = inner(scope);

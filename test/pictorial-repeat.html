@@ -22,7 +22,7 @@ under the License.
 <html>
     <head>
         <meta charset="utf-8">
-        <script src="lib/esl.js"></script>
+        <script src="lib/simpleRequire.js"></script>
         <script src="lib/config.js"></script>
         <script src="lib/jquery.min.js"></script>
         <script src="lib/facePrint.js"></script>
@@ -69,14 +69,6 @@ under the License.
             function makeChart(id, option, cb) {
                 require([
                     'echarts'
-                    // 'echarts/chart/pictorialBar',
-                    // 'echarts/chart/bar',
-                    // 'echarts/chart/scatter',
-                    // 'echarts/component/grid',
-                    // 'echarts/component/markLine',
-                    // 'echarts/component/legend',
-                    // 'echarts/component/tooltip',
-                    // 'echarts/component/dataZoom'
                 ], function (echarts) {
                     var main = document.getElementById(id);
                     if (main) {
@@ -569,7 +561,10 @@ under the License.
             makeChart('main4', {
                 color: ['#bb0004', 'orange'],
                 xAxis: {
+                    // NOTICE: Preserve this legacy setting: `data: []` as a test case:
+                    // declare it as a category axis by an empty data array.
                     data: [],
+                    // type: 'category',
                     axisTick: {show: false},
                     axisLabel: {show: false}
                 },

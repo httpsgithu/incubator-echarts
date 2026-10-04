@@ -23,7 +23,7 @@ under the License.
     <head>
         <meta charset="utf-8">
         <meta name="viewport" content="width=device-width, initial-scale=1" />
-        <script src="lib/esl.js"></script>
+        <script src="lib/simpleRequire.js"></script>
         <script src="lib/config.js"></script>
         <script src="lib/jquery.min.js"></script>
         <script src="lib/facePrint.js"></script>
@@ -182,7 +182,7 @@ under the License.
                         },
                         pointer: {
                             itemStyle: {
-                                color: 'auto'
+                                color: 'inherit'
                             }
                         },
                         axisTick: {
@@ -200,13 +200,13 @@ under the License.
                             }
                         },
                         axisLabel: {
-                            color: 'auto',
+                            color: 'inherit',
                             distance: 35,
                             fontSize: 20
                         },
                         detail: {
                             formatter: '{value}%',
-                            color: 'auto'
+                            color: 'inherit'
                         },
                         data: [{value: 70, name: '完成率'}]
                     }
@@ -264,19 +264,19 @@ under the License.
                         pointer: {
                             length: '80%',
                             itemStyle: {
-                                color: 'auto'
+                                color: 'inherit'
                             }
                         },
                         axisTick: {
                             length: 15,
                             lineStyle: {
-                                color: 'auto'
+                                color: 'inherit'
                             }
                         },
                         splitLine: {
                             length: 20,
                             lineStyle: {
-                                color: 'auto',
+                                color: 'inherit',
                                 width: 5
                             }
                         },
@@ -287,13 +287,13 @@ under the License.
                             formatter: function(value) {
                                 if (value === 0.875) {
                                     return '优'
-                                } 
+                                }
                                 else if (value === 0.625) {
                                     return '中'
-                                } 
+                                }
                                 else if (value === 0.375) {
                                     return '良'
-                                } 
+                                }
                                 else if (value === 0.125) {
                                     return '差'
                                 }
@@ -309,7 +309,7 @@ under the License.
                             formatter: function(value) {
                                 return value * 100 + '%';
                             },
-                            color: 'auto'
+                            color: 'inherit'
                         },
                         data: [{value: 0.75, name: '成绩评定'}]
                     }

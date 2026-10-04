@@ -23,7 +23,7 @@ under the License.
     <head>
         <meta charset="utf-8">
         <meta name="viewport" content="width=device-width, initial-scale=1" />
-        <script src="lib/esl.js"></script>
+        <script src="lib/simpleRequire.js"></script>
         <script src="lib/config.js"></script>
         <script src="lib/jquery.min.js"></script>
         <script src="lib/facePrint.js"></script>
@@ -42,10 +42,7 @@ under the License.
 
         <script>
         require([
-            'echarts',
-            // 'echarts/chart/pie',
-            // 'echarts/component/tooltip',
-            // 'echarts/component/legend'
+            'echarts'
         ], function (echarts) {
             var option;
 
@@ -318,6 +315,25 @@ under the License.
                                     itemStyle: { borderRadius: getCornerRadius() },
                                     emphasis: {
                                         itemStyle: { borderRadius: getEmphasisCornerRadius() }
+                                    }
+                                }]
+                            });
+                        }
+                    },
+                    {
+                        text: 'set radius for all corners',
+                        onclick: function () {
+                            isCircular = true;
+                            var val = [5, 15, 0, 20];
+                            chart.setOption({
+                                title: {
+                                    text: 'cornerRadius [' + val + ']'
+                                },
+                                series: [{
+                                    radius: ['40%', '75%'],
+                                    itemStyle: { borderRadius: val },
+                                    emphasis: {
+                                        itemStyle: { borderRadius: [20, 5, 10, 30] }
                                     }
                                 }]
                             });
